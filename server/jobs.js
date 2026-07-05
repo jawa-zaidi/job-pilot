@@ -3,7 +3,7 @@
 // - LinkedIn via Apify: activates when the user pastes an Apify token (beta).
 // - Naukri: coming soon (Apify scraper or Playwright).
 const crypto = require('crypto');
-const { load } = require('./db');
+const { load, logActivity } = require('./db');
 
 function stripHtml(html) {
   return String(html || '')
@@ -59,30 +59,47 @@ async function searchRemotive(query, limit = 12) {
   }));
 }
 
-// LinkedIn via Apify's linkedin-jobs-scraper actor (beta — needs an Apify token)
+// LinkedIn via Apify's harvestapi/linkedin-job-search actor (pay-per-event —
+// works on Apify's free monthly credit, but needs a one-time permission
+// approval in the user's Apify console).
+let linkedinPausedUntil = 0; // don't retry every query after a hard failure
+
 async function searchLinkedInApify(query, limit, token) {
-  const url = `https://api.apify.com/v2/acts/bebity~linkedin-jobs-scraper/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=120`;
+  if (Date.now() < linkedinPausedUntil) throw new Error('LinkedIn paused after a recent error (retries soon)');
+  const url = `https://api.apify.com/v2/acts/harvestapi~linkedin-job-search/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=120`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: query, location: '', rows: Math.min(limit, 25) }),
+    body: JSON.stringify({ searchQuery: query, maxItems: Math.min(limit, 25) }),
     signal: AbortSignal.timeout(150000)
   });
+  const bodyText = await res.text().catch(() => '');
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Apify LinkedIn ${res.status}: ${body.slice(0, 200)}`);
+    linkedinPausedUntil = Date.now() + 10 * 60 * 1000;
+    let msg = `Apify LinkedIn error ${res.status}`;
+    try {
+      const e = JSON.parse(bodyText).error || {};
+      if (e.type === 'full-permission-actor-not-approved') {
+        msg = `LinkedIn needs one-time approval: open ${e.data?.approvalUrl || 'console.apify.com'} , click Approve, then search again`;
+      } else if (e.type === 'actor-is-not-rented') {
+        msg = 'This LinkedIn scraper needs to be rented on Apify — contact support or wait for an app update';
+      } else if (e.message) {
+        msg = `Apify LinkedIn: ${e.message.slice(0, 160)}`;
+      }
+    } catch { /* keep generic msg */ }
+    throw new Error(msg);
   }
-  const items = await res.json();
+  const items = JSON.parse(bodyText);
   return (Array.isArray(items) ? items : []).slice(0, limit).map(j => ({
-    id: `linkedin-${crypto.createHash('md5').update(String(j.jobUrl || j.link || j.id || j.title + j.companyName)).digest('hex').slice(0, 10)}`,
+    id: `linkedin-${crypto.createHash('md5').update(String(j.jobUrl || j.url || j.link || j.id || String(j.title) + String(j.companyName))).digest('hex').slice(0, 10)}`,
     source: 'LinkedIn',
     title: j.title || 'Untitled role',
-    company: j.companyName || j.company || 'Unknown',
-    location: j.location || '',
-    url: j.jobUrl || j.link || '',
-    salary: j.salary || '',
-    publishedAt: j.publishedAt || j.postedTime || '',
-    description: stripHtml(j.description || j.descriptionText || '').slice(0, 5000)
+    company: j.companyName || j.company?.name || j.company || 'Unknown',
+    location: j.location?.linkedinText || j.location || '',
+    url: j.jobUrl || j.url || j.link || '',
+    salary: j.salaryText || j.salary || '',
+    publishedAt: j.postedDate || j.publishedAt || '',
+    description: stripHtml(j.descriptionText || j.description || '').slice(0, 5000)
   }));
 }
 
@@ -115,6 +132,12 @@ async function searchJobs(query, limit = 10) {
       used.push('LinkedIn');
     } catch (err) {
       console.error('LinkedIn (Apify) fetch failed:', err.message);
+      // surface actionable problems (like the one-time approval) to the user once
+      if (err.message.includes('approval') || err.message.includes('rented')) {
+        const db = load();
+        const recent = (db.activity || []).slice(0, 20).some(a => a.text.includes('LinkedIn needs') || a.text.includes('LinkedIn scraper'));
+        if (!recent) logActivity(`⚠️ ${err.message}`, 'error');
+      }
     }
   }
   // Naukri: not implemented yet (no official API; Apify scraper or Playwright next)
