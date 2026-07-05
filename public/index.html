@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobPilot — Job Application Autopilot</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="logo">✈️ <span>JobPilot</span></div>
+
+    <div class="side-section">
+      <div class="side-label">Profile</div>
+      <select id="profileSelect" class="profile-select"></select>
+      <div id="profileCard" class="profile-card">
+        <div class="empty-profile">
+          <p>Upload your CV once — JobPilot extracts your skills and tailors every application.</p>
+          <label class="btn btn-primary" for="cvInput">Upload CV</label>
+          <input type="file" id="cvInput" accept=".pdf,.docx,.txt,.md" hidden>
+        </div>
+      </div>
+    </div>
+
+    <div class="side-section">
+      <div class="side-label">Find jobs manually</div>
+      <div class="search-box">
+        <input id="searchInput" type="text" placeholder="e.g. frontend engineer">
+        <button id="searchBtn" class="btn btn-primary">Search</button>
+      </div>
+      <div class="source-list"></div>
+      <div id="autoSearchStatus" class="email-status"></div>
+    </div>
+
+    <div class="side-section">
+      <button id="reportBtn" class="btn btn-ghost" style="width:100%">📊 Improvement report</button>
+      <button id="settingsBtn" class="btn btn-ghost" style="width:100%;margin-top:8px">⚙️ Settings &amp; API keys</button>
+      <div id="emailStatus" class="email-status"></div>
+    </div>
+
+    <div class="side-footer">
+      <span id="modeBadge" class="badge"></span>
+      <button id="resetBtn" class="btn-link">Reset this profile</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h1>Dashboard</h1>
+      <div id="toast" class="toast"></div>
+    </header>
+
+    <section class="stats" id="statsRow">
+      <div class="stat"><div class="stat-num" id="stTotal">0</div><div class="stat-label">Jobs found</div></div>
+      <div class="stat"><div class="stat-num" id="stApplied">0</div><div class="stat-label">Applied</div></div>
+      <div class="stat"><div class="stat-num" id="stFollow">0</div><div class="stat-label">Follow-ups sent</div></div>
+      <div class="stat"><div class="stat-num" id="stReplied">0</div><div class="stat-label">Replies ⭐</div></div>
+      <div class="stat"><div class="stat-num" id="stInterview">0</div><div class="stat-label">Interviews</div></div>
+      <div class="stat funnel-stat"><div id="funnel" class="funnel"></div><div class="stat-label">Pipeline</div></div>
+    </section>
+
+    <!-- The two buttons -->
+    <section class="action-bar">
+      <button id="smartBtn" class="btn btn-primary smart-btn">🔍 Find jobs</button>
+      <button id="syncBtn" class="btn btn-ghost smart-btn">🔄 Sync — follow-ups &amp; inbox</button>
+      <div class="mode-toggle">
+        <span>Mode:</span>
+        <select id="modeSelect">
+          <option value="manual">Manual</option>
+          <option value="auto">Auto</option>
+        </select>
+        <span style="margin-left:10px">Target:</span>
+        <input type="number" id="targetInput" min="1" max="200" value="50">
+      </div>
+    </section>
+    <div class="feedback-row">
+      <input type="text" id="feedbackInput" placeholder='Teach the AI: e.g. "avoid agency jobs" or "make emails shorter and mention my fintech work"'>
+      <button class="btn btn-ghost btn-sm" id="feedbackBtn">Save instruction</button>
+    </div>
+
+    <!-- Filters -->
+    <section class="filter-bar">
+      <select id="stageFilter">
+        <option value="all">All stages</option>
+        <option value="fresh">Fresh applied</option>
+        <option value="fu1">1st follow-up</option>
+        <option value="fu2">2nd follow-up</option>
+        <option value="fu3">3rd follow-up</option>
+        <option value="replied">Got reply ⭐ (potentials)</option>
+        <option value="interview">Interview in process</option>
+        <option value="no_response">No response (closed)</option>
+        <option value="rejected">Rejected</option>
+      </select>
+      <label>Applied from <input type="date" id="dateFrom"></label>
+      <label>to <input type="date" id="dateTo"></label>
+      <button class="btn-link" id="clearFilters">Clear filters</button>
+      <span id="filterCount" class="filter-count"></span>
+    </section>
+
+    <section class="board" id="board"></section>
+
+    <section class="activity-section">
+      <h2>Activity</h2>
+      <ul id="activityFeed" class="activity"></ul>
+    </section>
+  </main>
+</div>
+
+<!-- Settings modal -->
+<div id="settingsOverlay" class="modal-overlay hidden">
+  <div class="modal">
+    <button class="drawer-close" id="settingsClose">✕</button>
+    <h2 id="settingsTitle">Settings</h2>
+    <p class="modal-sub" id="settingsSub">Everything is stored locally on your machine — nothing goes to any server except the AI/job APIs you configure.</p>
+
+    <div id="welcomeBox" class="welcome-box hidden">
+      👋 <strong>Welcome to JobPilot!</strong> Three quick things and you're flying:
+      <b>1)</b> add an AI key below, <b>2)</b> add your Gmail for sending (optional, can do later),
+      <b>3)</b> close this and upload your CV.
+    </div>
+
+    <h3>📁 Your data folder</h3>
+    <div class="data-box">
+      <code id="dataDirPath"></code>
+      <small>All your data (profiles, applications, keys, history) lives in this one folder.
+      <strong>To move to a new device:</strong> copy this folder to the same place on the new
+      computer, run the setup command there, and everything reopens exactly as you left it.
+      Back it up like you would photos.</small>
+    </div>
+
+    <h3>🔍 Job sources</h3>
+    <label class="src-row">
+      <input type="checkbox" id="srcRemotive" checked>
+      <div><strong>Remotive</strong> — remote jobs worldwide<br>
+      <small>Free, works out of the box, nothing to configure.</small></div>
+    </label>
+    <label class="src-row">
+      <input type="checkbox" id="srcLinkedin">
+      <div><strong>LinkedIn</strong> (via Apify) <span class="beta">beta</span><br>
+      <small>Needs a free Apify account token:</small>
+      <details class="steps">
+        <summary>How to get the token (2 minutes)</summary>
+        <ol>
+          <li>Create a free account at <a href="https://apify.com" target="_blank">apify.com</a></li>
+          <li>Open <a href="https://console.apify.com/settings/integrations" target="_blank">Console → Settings → API &amp; Integrations</a></li>
+          <li>Copy your <em>Personal API token</em> and paste it below</li>
+        </ol>
+        <small>Note: Apify's free plan includes $5 monthly credit — roughly a few hundred LinkedIn job fetches.</small>
+      </details>
+      <input type="password" id="setApifyToken" placeholder="apify_api_…" autocomplete="off" style="margin-top:6px">
+      </div>
+    </label>
+    <label class="src-row disabled">
+      <input type="checkbox" id="srcNaukri" disabled>
+      <div><strong>Naukri</strong> <span class="beta">coming soon</span><br>
+      <small>Naukri has no official API — we'll add it via scraping in an update.</small></div>
+    </label>
+
+    <h3>AI provider &amp; model</h3>
+    <label class="field">
+      <span>Provider</span>
+      <select id="setProvider">
+        <option value="groq">Groq (fast &amp; free tier)</option>
+        <option value="openai">OpenAI (ChatGPT)</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Model (blank = recommended default)</span>
+      <input type="text" id="setModel" placeholder="llama-3.3-70b-versatile">
+      <small id="modelHint"></small>
+    </label>
+    <label class="field">
+      <span>Groq API key</span>
+      <input type="password" id="setGroqKey" placeholder="gsk_…" autocomplete="off">
+      <small>Free at <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent)">console.groq.com/keys</a> — create account → API Keys → Create.</small>
+    </label>
+    <label class="field">
+      <span>OpenAI API key</span>
+      <input type="password" id="setOpenaiKey" placeholder="sk-…" autocomplete="off">
+      <small>From <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--accent)">platform.openai.com/api-keys</a> (paid account needed).</small>
+    </label>
+
+    <h3>Custom AI instructions (system prompt)</h3>
+    <label class="field">
+      <textarea id="setCustomPrompt" rows="5" placeholder="Anything you want the AI to always do — e.g.&#10;- Keep emails under 120 words&#10;- Never apply to staffing agencies&#10;- Always mention my fintech experience"></textarea>
+      <small>Feedback you save from the dashboard also lands here. Applied to job scoring, CVs, emails and follow-ups.</small>
+    </label>
+
+    <h3>Auto job discovery</h3>
+    <label class="field" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="setAutoSearch" style="width:auto">
+      <span style="margin:0">Automatically search for new jobs every</span>
+      <input type="number" id="setAutoSearchHours" min="1" max="24" style="width:60px" value="6">
+      <span style="margin:0">hours</span>
+    </label>
+
+    <h3>📊 Improvement reports (auto feedback)</h3>
+    <label class="field" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="setInsightsEnabled" style="width:auto">
+      <span style="margin:0">Analyze my results and email me improvement points every</span>
+      <input type="number" id="setInsightsEvery" min="5" max="500" style="width:64px" value="50">
+      <span style="margin:0">applications</span>
+    </label>
+    <label class="field">
+      <span>Send reports to</span>
+      <input type="email" id="setInsightsEmail" placeholder="you@gmail.com">
+      <small>Also sent after every automated run. Reports are always viewable in the app (📊 button).</small>
+    </label>
+
+    <h3>Email — Gmail (sends from your name)</h3>
+    <label class="field">
+      <span>Your name (email "From")</span>
+      <input type="text" id="setFromName" placeholder="e.g. Mohammed Jawad">
+    </label>
+    <label class="field">
+      <span>Gmail address</span>
+      <input type="email" id="setSmtpUser" placeholder="you@gmail.com">
+    </label>
+    <label class="field">
+      <span>Gmail app password</span>
+      <input type="password" id="setSmtpPass" placeholder="16-character app password" autocomplete="off">
+      <small>Google Account → Security → 2-Step Verification → App passwords. Also used to read your inbox for the Sync button.</small>
+    </label>
+
+    <div class="drawer-actions">
+      <button class="btn btn-primary" id="settingsSave">Save settings</button>
+      <button class="btn btn-ghost" id="testEmailBtn">Send test email to myself</button>
+    </div>
+  </div>
+</div>
+
+<!-- Profile editor modal -->
+<div id="profileOverlay" class="modal-overlay hidden">
+  <div class="modal">
+    <button class="drawer-close" id="profileClose">✕</button>
+    <h2>Edit your profile</h2>
+    <p class="modal-sub">Extracted from your CV — edit anything and save. The AI uses this for scoring, CVs and emails.</p>
+    <label class="field">
+      <textarea id="profileEditor" rows="18" spellcheck="false"></textarea>
+      <small>JSON format — keep the field names, edit the values.</small>
+    </label>
+    <div class="drawer-actions">
+      <button class="btn btn-primary" id="profileSave">Save profile</button>
+      <label class="btn btn-ghost" for="cvInput">Re-upload CV instead</label>
+    </div>
+  </div>
+</div>
+
+<!-- Improvement report modal -->
+<div id="reportOverlay" class="modal-overlay hidden">
+  <div class="modal">
+    <button class="drawer-close" id="reportClose">✕</button>
+    <h2>📊 Improvement reports</h2>
+    <p class="modal-sub" id="reportSub"></p>
+    <div class="drawer-actions" style="margin:0 0 14px">
+      <button class="btn btn-primary btn-sm" id="reportRunBtn">Generate report now</button>
+    </div>
+    <div id="reportList"></div>
+  </div>
+</div>
+
+<!-- Detail drawer -->
+<div id="drawerOverlay" class="drawer-overlay hidden">
+  <div class="drawer" id="drawer">
+    <button class="drawer-close" id="drawerClose">✕</button>
+    <div id="drawerContent"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

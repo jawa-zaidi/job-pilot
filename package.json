@@ -1,0 +1,19 @@
+{
+  "name": "jobpilot",
+  "version": "0.1.0",
+  "description": "JobPilot — automated job search, tailored CV & email generation, application tracking with auto follow-ups",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "imapflow": "^1.4.3",
+    "mammoth": "^1.8.0",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^9.0.3",
+    "pdf-parse": "^1.1.1"
+  }
+}
