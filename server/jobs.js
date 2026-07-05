@@ -41,12 +41,33 @@ function sourcesConfig() {
   };
 }
 
+// Rank a board's feed against the query ourselves — some free boards ignore
+// or poorly support their own search parameter.
+function keywordFilter(jobs, query, limit) {
+  const words = String(query).toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  if (!words.length) return jobs.slice(0, limit);
+  const scored = jobs.map(j => {
+    const title = (j.title || '').toLowerCase();
+    const desc = (j.description || '').toLowerCase();
+    let hits = 0;
+    for (const w of words) {
+      if (title.includes(w)) hits += 3;
+      else if (desc.includes(w)) hits += 1;
+    }
+    return { j, hits };
+  }).filter(x => x.hits > 0);
+  scored.sort((a, b) => b.hits - a.hits);
+  return scored.slice(0, limit).map(x => x.j);
+}
+
 async function searchRemotive(query, limit = 12) {
-  const url = `https://remotive.com/api/remote-jobs?search=${encodeURIComponent(query)}&limit=${limit}`;
+  // NOTE: Remotive's `search` param currently ignores the query and returns
+  // the same latest feed — so we pull the feed and keyword-filter locally.
+  const url = `https://remotive.com/api/remote-jobs?limit=50`;
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`Remotive API ${res.status}`);
   const data = await res.json();
-  return (data.jobs || []).slice(0, limit).map(j => ({
+  const all = (data.jobs || []).map(j => ({
     id: `remotive-${j.id}`,
     source: 'Remotive',
     title: j.title,
@@ -57,6 +78,48 @@ async function searchRemotive(query, limit = 12) {
     publishedAt: j.publication_date,
     description: stripHtml(j.description).slice(0, 5000)
   }));
+  return keywordFilter(all, query, limit);
+}
+
+// RemoteOK — free public feed, no key (first array element is a legal notice)
+async function searchRemoteOK(query, limit = 12) {
+  const res = await fetch('https://remoteok.com/api', {
+    headers: { 'User-Agent': 'JobPilot' },
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!res.ok) throw new Error(`RemoteOK API ${res.status}`);
+  const data = await res.json();
+  const all = (Array.isArray(data) ? data : []).filter(j => j && j.position).map(j => ({
+    id: `remoteok-${j.id || j.slug}`,
+    source: 'RemoteOK',
+    title: j.position,
+    company: j.company || 'Unknown',
+    location: j.location || 'Remote',
+    url: j.url || (j.slug ? `https://remoteok.com/remote-jobs/${j.slug}` : ''),
+    salary: j.salary_min ? `$${j.salary_min}–${j.salary_max || '?'}` : '',
+    publishedAt: j.date || '',
+    description: stripHtml(j.description || (j.tags || []).join(', ')).slice(0, 5000)
+  }));
+  return keywordFilter(all, query, limit);
+}
+
+// Arbeitnow — free public job board API, no key
+async function searchArbeitnow(query, limit = 12) {
+  const res = await fetch('https://www.arbeitnow.com/api/job-board-api', { signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`Arbeitnow API ${res.status}`);
+  const data = await res.json();
+  const all = (data.data || []).map(j => ({
+    id: `arbeitnow-${j.slug}`,
+    source: 'Arbeitnow',
+    title: j.title,
+    company: j.company_name,
+    location: (j.remote ? 'Remote · ' : '') + (j.location || ''),
+    url: j.url,
+    salary: '',
+    publishedAt: j.created_at ? new Date(j.created_at * 1000).toISOString() : '',
+    description: stripHtml(j.description).slice(0, 5000)
+  }));
+  return keywordFilter(all, query, limit);
 }
 
 // LinkedIn via Apify's harvestapi/linkedin-job-search actor (pay-per-event —
@@ -119,12 +182,21 @@ async function searchJobs(query, limit = 10) {
   const used = [];
 
   if (cfg.remotive) {
-    try {
-      jobs.push(...await searchRemotive(query, limit));
-      used.push('Remotive');
-    } catch (err) {
-      console.error('Remotive fetch failed:', err.message);
-    }
+    // "Free job boards" toggle covers Remotive + RemoteOK + Arbeitnow
+    const boards = [
+      ['Remotive', searchRemotive],
+      ['RemoteOK', searchRemoteOK],
+      ['Arbeitnow', searchArbeitnow]
+    ];
+    const results = await Promise.allSettled(boards.map(([, fn]) => fn(query, limit)));
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        jobs.push(...r.value);
+        if (r.value.length) used.push(boards[i][0]);
+      } else {
+        console.error(`${boards[i][0]} fetch failed:`, r.reason.message);
+      }
+    });
   }
   if (cfg.linkedin && cfg.apifyToken) {
     try {

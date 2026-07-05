@@ -244,7 +244,7 @@ function renderStats(s) {
 
 function renderSideStatus(s) {
   const srcHtml = [
-    { on: s.sources.remotive, name: 'Remotive', note: s.sources.remotive ? 'live' : 'off' },
+    { on: s.sources.remotive, name: 'Free boards ×3', note: s.sources.remotive ? 'live' : 'off' },
     { on: s.sources.linkedin && s.apifyTokenSet, name: 'LinkedIn (Apify)', note: s.sources.linkedin ? (s.apifyTokenSet ? 'live' : 'needs token') : 'off' },
     { on: false, name: 'Naukri', note: 'soon' }
   ].map(x =>
