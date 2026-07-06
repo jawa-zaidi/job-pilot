@@ -633,7 +633,10 @@ async function openSettings(welcome = false) {
   $('#srcLinkedin').checked = s.sources.linkedin;
   $('#setApifyToken').value = '';
   $('#setApifyToken').placeholder = s.apifyTokenSet ? `configured ✓ (${s.apifyTokenMasked}) — paste to replace` : 'apify_api_…';
-  $('#setJobLocation').value = s.jobLocation || '';
+  $('#setJobLocations').value = (s.jobLocations || []).join(', ');
+  $('#setRemoteOk').checked = s.remoteOk;
+  $('#setMaxAge').value = s.maxJobAgeDays;
+  $('#setLowComp').checked = s.preferLowCompetition;
   $('#setProvider').value = s.provider;
   $('#setModel').value = s.model;
   $('#setModel').placeholder = s.activeModel;
@@ -687,7 +690,10 @@ $('#settingsSave').addEventListener('click', async () => {
         naukri: false
       },
       apifyToken: $('#setApifyToken').value,
-      jobLocation: $('#setJobLocation').value
+      jobLocations: $('#setJobLocations').value,
+      remoteOk: $('#setRemoteOk').checked,
+      maxJobAgeDays: $('#setMaxAge').value,
+      preferLowCompetition: $('#setLowComp').checked
     }});
     toast('Settings saved');
     $('#settingsOverlay').classList.add('hidden');

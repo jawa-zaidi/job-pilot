@@ -322,7 +322,10 @@ app.get('/api/settings', (req, res) => {
     },
     apifyTokenSet: !!(s.apifyToken),
     apifyTokenMasked: s.apifyToken ? s.apifyToken.slice(0, 10) + '…' : '',
-    jobLocation: s.jobLocation || ''
+    jobLocations: Array.isArray(s.jobLocations) ? s.jobLocations : (s.jobLocation ? [s.jobLocation] : []),
+    maxJobAgeDays: s.maxJobAgeDays || 30,
+    preferLowCompetition: !!s.preferLowCompetition,
+    remoteOk: s.remoteOk !== false
   });
 });
 
@@ -340,7 +343,16 @@ app.post('/api/settings', (req, res) => {
     };
   }
   if (apifyToken !== undefined && apifyToken.trim()) db.settings.apifyToken = apifyToken.trim();
-  if (req.body.jobLocation !== undefined) db.settings.jobLocation = String(req.body.jobLocation).trim();
+  if (req.body.jobLocations !== undefined) {
+    const list = Array.isArray(req.body.jobLocations)
+      ? req.body.jobLocations
+      : String(req.body.jobLocations).split(',');
+    db.settings.jobLocations = list.map(l => String(l).trim()).filter(Boolean);
+    delete db.settings.jobLocation; // retire the old single-value field
+  }
+  if (req.body.maxJobAgeDays !== undefined) db.settings.maxJobAgeDays = Math.max(1, Number(req.body.maxJobAgeDays) || 30);
+  if (req.body.preferLowCompetition !== undefined) db.settings.preferLowCompetition = !!req.body.preferLowCompetition;
+  if (req.body.remoteOk !== undefined) db.settings.remoteOk = !!req.body.remoteOk;
   if (groqKey !== undefined && groqKey.trim()) db.settings.groqKey = groqKey.trim();
   if (openaiKey !== undefined && openaiKey.trim()) db.settings.openaiKey = openaiKey.trim();
   if (provider !== undefined) db.settings.provider = provider === 'openai' ? 'openai' : 'groq';

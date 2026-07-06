@@ -118,9 +118,9 @@
     <p class="modal-sub" id="settingsSub">Everything is stored locally on your machine — nothing goes to any server except the AI/job APIs you configure.</p>
 
     <div id="welcomeBox" class="welcome-box hidden">
-      👋 <strong>Welcome to JobPilot!</strong> Three quick things and you're flying:
-      <b>1)</b> add an AI key below, <b>2)</b> add your Gmail for sending (optional, can do later),
-      <b>3)</b> close this and upload your CV.
+      👋 <strong>Welcome to JobPilot!</strong> A few quick things and you're flying:
+      <b>1)</b> set your preferred locations under 🎯 Job preferences, <b>2)</b> add an AI key,
+      <b>3)</b> add your Gmail for sending (optional), <b>4)</b> close this and upload your CV.
     </div>
 
     <h3>📁 Your data folder</h3>
@@ -162,10 +162,25 @@
       <div><strong>Naukri</strong> <span class="beta">coming soon</span><br>
       <small>Naukri has no official API — we'll add it via scraping in an update.</small></div>
     </label>
+    <h3>🎯 Job preferences (makes "Find jobs" smart)</h3>
     <label class="field">
-      <span>Preferred job location <small style="color:var(--muted)">(optional — e.g. "India", "Bangalore", "Remote")</small></span>
-      <input type="text" id="setJobLocation" placeholder="anywhere">
-      <small>Used by the LinkedIn search to target the right region.</small>
+      <span>Preferred locations <small style="color:var(--muted)">(comma-separated — cities or countries, e.g. "Bangalore, India, Remote")</small></span>
+      <input type="text" id="setJobLocations" placeholder="e.g. Bangalore, India, Remote">
+      <small>Jobs outside these are filtered out. Add "Remote" to include remote roles. Leave blank to allow anywhere.</small>
+    </label>
+    <label class="field" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="setRemoteOk" style="width:auto" checked>
+      <span style="margin:0">Always include remote / worldwide jobs</span>
+    </label>
+    <label class="field" style="display:flex;align-items:center;gap:8px">
+      <span style="margin:0">Only show jobs posted in the last</span>
+      <input type="number" id="setMaxAge" min="1" max="90" style="width:64px" value="30">
+      <span style="margin:0">days</span>
+    </label>
+    <small style="color:var(--muted);display:block;margin:-6px 0 8px">Fresher postings have far fewer applicants — better odds. 7–14 days is a good sweet spot.</small>
+    <label class="field" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="setLowComp" style="width:auto">
+      <span style="margin:0">Prefer low-competition jobs (LinkedIn: under 10 applicants)</span>
     </label>
 
     <h3>AI provider &amp; model</h3>

@@ -41,6 +41,57 @@ function sourcesConfig() {
   };
 }
 
+// User preferences that make "find jobs" smart: where they can work, how fresh
+// a posting must be, and whether to favor low-competition roles.
+function jobPrefs() {
+  const s = load().settings || {};
+  let locations = s.jobLocations;
+  if (!Array.isArray(locations)) locations = s.jobLocation ? [s.jobLocation] : []; // migrate old single value
+  locations = locations.map(l => String(l).trim()).filter(Boolean);
+  return {
+    locations,
+    remoteOk: s.remoteOk !== false,                 // treat remote/worldwide as acceptable (default yes)
+    maxAgeDays: Math.max(1, Number(s.maxJobAgeDays) || 30),
+    preferLowComp: !!s.preferLowCompetition
+  };
+}
+
+function jobAgeDays(job) {
+  if (!job.publishedAt) return null;
+  const t = new Date(job.publishedAt).getTime();
+  if (isNaN(t)) return null;
+  return (Date.now() - t) / 86400000;
+}
+
+function isRecent(job, maxAgeDays) {
+  const age = jobAgeDays(job);
+  return age == null ? true : age <= maxAgeDays; // unknown date → keep (don't over-filter)
+}
+
+// Does a job's location satisfy the user's preferred locations?
+function matchesLocation(job, prefs) {
+  if (!prefs.locations.length) return true; // no preference set → accept everything
+  const loc = (job.location || '').toLowerCase();
+  const remoteish = /remote|worldwide|anywhere|distributed/.test(loc) || loc === '';
+  if (prefs.remoteOk && remoteish) return true;
+  return prefs.locations.some(l => {
+    const p = l.toLowerCase();
+    if (p === 'remote') return remoteish;
+    return loc.includes(p);
+  });
+}
+
+// Newest first, then apply recency + location filters
+function refine(jobs, prefs) {
+  return jobs
+    .filter(j => isRecent(j, prefs.maxAgeDays) && matchesLocation(j, prefs))
+    .sort((a, b) => {
+      const da = new Date(a.publishedAt || 0).getTime() || 0;
+      const db = new Date(b.publishedAt || 0).getTime() || 0;
+      return db - da;
+    });
+}
+
 // Rank a board's feed against the query ourselves — some free boards ignore
 // or poorly support their own search parameter.
 function keywordFilter(jobs, query, limit) {
@@ -130,15 +181,21 @@ let linkedinPausedUntil = 0; // don't retry every query after a hard failure
 async function searchLinkedInApify(query, limit, token) {
   if (Date.now() < linkedinPausedUntil) throw new Error('LinkedIn paused after a recent error (retries soon)');
   const url = `https://api.apify.com/v2/acts/harvestapi~linkedin-job-search/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=120`;
-  const jobLocation = (load().settings?.jobLocation || '').trim();
+  const prefs = jobPrefs();
+  // LinkedIn ignores "Remote" as a location string, so pass only real places
+  const locs = prefs.locations.filter(l => l.toLowerCase() !== 'remote');
+  // freshest postings first, and only recent ones (fewer applicants already)
+  const postedLimit = prefs.maxAgeDays <= 1 ? '24h' : prefs.maxAgeDays <= 7 ? 'week' : 'month';
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       jobTitles: [query],
       maxItems: Math.min(limit, 25),
-      sortBy: 'date', // newest first — apply as soon as they're out
-      ...(jobLocation ? { locations: [jobLocation] } : {})
+      sortBy: 'date',       // newest first — apply as soon as they're out
+      postedLimit,          // restrict to recent postings
+      ...(locs.length ? { locations: locs } : {}),
+      ...(prefs.preferLowComp ? { under10Applicants: true } : {})
     }),
     signal: AbortSignal.timeout(150000)
   });
@@ -186,21 +243,29 @@ function sampleJobs() {
 
 async function searchJobs(query, limit = 10) {
   const cfg = sourcesConfig();
+  const prefs = jobPrefs();
   const jobs = [];
   const used = [];
+  let filtered = 0; // dropped for location/recency
 
   if (cfg.remotive) {
-    // "Free job boards" toggle covers Remotive + RemoteOK + Arbeitnow
+    // Free boards. Remotive/RemoteOK are remote/English; Arbeitnow is EU/Germany-
+    // heavy, so we only query it when the user actually targets Europe (else it
+    // floods results with German-language jobs). Pull extra since we filter hard.
+    const wantsEurope = !prefs.locations.length ||
+      prefs.locations.some(l => /germany|deutschland|berlin|munich|münchen|europe|eu|netherlands|amsterdam|remote/i.test(l));
     const boards = [
       ['Remotive', searchRemotive],
       ['RemoteOK', searchRemoteOK],
-      ['Arbeitnow', searchArbeitnow]
+      ...(wantsEurope ? [['Arbeitnow', searchArbeitnow]] : [])
     ];
-    const results = await Promise.allSettled(boards.map(([, fn]) => fn(query, limit)));
+    const results = await Promise.allSettled(boards.map(([, fn]) => fn(query, limit * 2)));
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') {
-        jobs.push(...r.value);
-        if (r.value.length) used.push(boards[i][0]);
+        const refined = refine(r.value, prefs);
+        filtered += r.value.length - refined.length;
+        jobs.push(...refined.slice(0, limit));
+        if (refined.length) used.push(boards[i][0]);
       } else {
         console.error(`${boards[i][0]} fetch failed:`, r.reason.message);
       }
@@ -209,12 +274,14 @@ async function searchJobs(query, limit = 10) {
   if (cfg.linkedin && cfg.apifyToken) {
     try {
       const li = await searchLinkedInApify(query, limit, cfg.apifyToken);
-      jobs.push(...li);
-      used.push('LinkedIn');
       try { require('./costs').recordSource('LinkedIn', li.length); } catch { /* best-effort */ }
+      // LinkedIn already filtered by location/date server-side; recency safety only
+      const refined = li.filter(j => isRecent(j, prefs.maxAgeDays));
+      filtered += li.length - refined.length;
+      jobs.push(...refined);
+      if (refined.length) used.push('LinkedIn');
     } catch (err) {
       console.error('LinkedIn (Apify) fetch failed:', err.message);
-      // surface actionable problems (like the one-time approval) to the user once
       if (err.message.includes('approval') || err.message.includes('rented')) {
         const db = load();
         const recent = (db.activity || []).slice(0, 20).some(a => a.text.includes('LinkedIn needs') || a.text.includes('LinkedIn scraper'));
@@ -225,17 +292,20 @@ async function searchJobs(query, limit = 10) {
   // Naukri: not implemented yet (no official API; Apify scraper or Playwright next)
 
   if (!jobs.length) {
-    return { jobs: sampleJobs(), source: used.length ? `Sample (${used.join('+')} returned nothing)` : 'Sample (offline fallback)' };
+    // Don't fall back to sample jobs when the user has real filters — an empty
+    // result is honest ("nothing fresh in your locations"); sample jobs mislead.
+    if (prefs.locations.length || used.length) return { jobs: [], source: used.join(' + ') || 'no sources', filtered };
+    return { jobs: sampleJobs(), source: 'Sample (offline fallback)', filtered };
   }
-  // dedupe by title+company across sources
+  // dedupe by title+company across sources, newest first
   const seen = new Set();
   const unique = jobs.filter(j => {
     const k = `${j.title}|${j.company}`.toLowerCase();
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
-  });
-  return { jobs: unique, source: used.join(' + ') };
+  }).sort((a, b) => (new Date(b.publishedAt || 0).getTime() || 0) - (new Date(a.publishedAt || 0).getTime() || 0));
+  return { jobs: unique, source: used.join(' + '), filtered };
 }
 
-module.exports = { searchJobs, sourcesConfig };
+module.exports = { searchJobs, sourcesConfig, jobPrefs };
