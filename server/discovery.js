@@ -74,21 +74,11 @@ async function autoSearchTick(force = false) {
     return { ran: true, mode: 'auto', ...cycle };
   }
 
-  // Manual mode: only discover — the user reviews and drives the rest.
-  const queries = (db.profile.target_roles || []).slice(0, 2);
-  if (!queries.length) queries.push(db.profile.title || 'software');
-
-  let added = 0, skipped = 0;
-  for (const q of queries) {
-    try {
-      const r = await discover(q, { activityLabel: 'Auto-discovery' });
-      added += r.added;
-      skipped += r.skipped;
-    } catch (err) {
-      console.error(`auto-search "${q}" failed:`, err.message);
-    }
-  }
-  return { ran: true, mode: 'manual', added, skipped, queries };
+  // Manual mode: discover up to the per-cycle target — the user reviews and
+  // drives the rest. Same capped fetch as the smart button.
+  const batch = require('./batch');
+  const r = await batch.fetchBatch();
+  return { ran: true, mode: 'manual', ...r };
 }
 
 function startAutoSearch() {

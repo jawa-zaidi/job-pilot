@@ -89,7 +89,6 @@ async function refresh() {
   badge.className = 'badge ' + (stats.mockMode ? 'mock' : 'live');
   if (state.settings) {
     $('#modeSelect').value = state.settings.mode;
-    if (document.activeElement !== $('#targetInput')) $('#targetInput').value = state.settings.dailyTarget;
   }
   if (state.openId) {
     const a = state.applications.find(x => x.id === state.openId);
@@ -131,7 +130,7 @@ $('#smartBtn').addEventListener('click', async e => {
   btn.innerHTML = '<span class="spinner"></span>Working…';
   try {
     if (action === 'fetch') {
-      const r = await api('/api/batch/fetch', { method: 'POST', body: { target: Number($('#targetInput').value) || 50 } });
+      const r = await api('/api/batch/fetch', { method: 'POST', body: {} });
       toast(r.added
         ? `Found ${r.added} good new matches (${r.skipped} poor fits filtered). Remove any you don't like (✕), then hit the button again.`
         : `No new matches right now — ${r.skipped} jobs were screened but didn't fit, and good ones may already be on your board. Try a manual search with a different term.`);
@@ -288,6 +287,9 @@ function renderBoard() {
     el.addEventListener('dragend', () => el.classList.remove('dragging'));
     el.addEventListener('click', () => openDrawer(el.dataset.id));
   });
+  board.querySelectorAll('.card-link').forEach(el => {
+    el.addEventListener('click', e => e.stopPropagation()); // open the posting, not the drawer
+  });
   board.querySelectorAll('.card-x').forEach(el => {
     el.addEventListener('click', async e => {
       e.stopPropagation();
@@ -324,6 +326,7 @@ function cardHtml(a) {
       <div class="card-company">${esc(a.company)} · ${esc(a.location)}</div>
       <div class="card-meta">
         <span class="score ${cls}">${a.matchScore}%</span>
+        ${a.url ? `<a class="card-link" href="${esc(a.url)}" target="_blank" title="Open the job posting">view job ↗</a>` : ''}
         ${a.tailored ? '<span class="tag done">CV ✓</span>' : ''}
         ${a.replied ? '<span class="tag done">Reply ⭐</span>' : ''}
         ${a.appliedAt ? `<span class="card-date">applied ${new Date(a.appliedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>` : ''}
@@ -486,10 +489,6 @@ $('#modeSelect').addEventListener('change', async e => {
   refresh();
 });
 
-$('#targetInput').addEventListener('change', async e => {
-  await api('/api/settings', { method: 'POST', body: { dailyTarget: e.target.value } });
-  toast(`Target set to ${e.target.value} applications per cycle`);
-});
 
 // ---------- Filters ----------
 
@@ -621,6 +620,7 @@ async function openSettings(welcome = false) {
   $('#setCustomPrompt').value = s.customPrompt;
   $('#setAutoSearch').checked = s.autoSearch;
   $('#setAutoSearchHours').value = s.autoSearchHours;
+  $('#setDailyTarget').value = s.dailyTarget;
   $('#setInsightsEnabled').checked = s.insightsEnabled;
   $('#setInsightsEvery').value = s.insightsEvery;
   $('#setInsightsEmail').value = s.insightsEmail;
@@ -652,6 +652,7 @@ $('#settingsSave').addEventListener('click', async () => {
       smtpPass: $('#setSmtpPass').value,
       autoSearch: $('#setAutoSearch').checked,
       autoSearchHours: $('#setAutoSearchHours').value,
+      dailyTarget: $('#setDailyTarget').value,
       insightsEnabled: $('#setInsightsEnabled').checked,
       insightsEvery: $('#setInsightsEvery').value,
       insightsEmail: $('#setInsightsEmail').value,

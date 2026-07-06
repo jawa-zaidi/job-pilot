@@ -71,8 +71,6 @@
           <option value="manual">Manual</option>
           <option value="auto">Auto</option>
         </select>
-        <span style="margin-left:10px">Target:</span>
-        <input type="number" id="targetInput" min="1" max="200" value="50">
       </div>
     </section>
     <div class="feedback-row">
@@ -202,6 +200,11 @@
       <span style="margin:0">Automatically search for new jobs every</span>
       <input type="number" id="setAutoSearchHours" min="1" max="24" style="width:60px" value="6">
       <span style="margin:0">hours</span>
+    </label>
+    <label class="field">
+      <span>Applications per cycle (max)</span>
+      <input type="number" id="setDailyTarget" min="1" max="200" value="50">
+      <small>Each fetch collects up to this many good matches — fewer if the sources don't have enough. Caps AI usage and how many emails go out per run.</small>
     </label>
 
     <h3>📊 Improvement reports (auto feedback)</h3>

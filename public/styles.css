@@ -154,6 +154,8 @@ body.nav-collapsed .sidebar { width: 0; padding: 20px 0; border-right: none; ove
 .card:hover .card-x { opacity: 1; }
 .card-x:hover { color: var(--red); background: rgba(224,86,91,.12); }
 .card-date { font-size: 10px; color: var(--muted); }
+.card-link { font-size: 10.5px; color: var(--accent); text-decoration: none; border: 1px solid rgba(79,140,255,.35); border-radius: 6px; padding: 1px 6px; }
+.card-link:hover { background: rgba(79,140,255,.12); }
 .card:hover { border-color: var(--accent); transform: translateY(-1px); }
 .card.dragging { opacity: .5; }
 .card-title { font-weight: 600; font-size: 13px; line-height: 1.3; }
