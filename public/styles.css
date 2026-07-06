@@ -159,6 +159,12 @@ body.nav-collapsed .sidebar { width: 0; padding: 20px 0; border-right: none; ove
 .card-date { font-size: 10px; color: var(--muted); }
 .card-link { font-size: 10.5px; color: var(--accent); text-decoration: none; border: 1px solid rgba(79,140,255,.35); border-radius: 6px; padding: 1px 6px; }
 .card-link:hover { background: rgba(79,140,255,.12); }
+.review-box { background: rgba(124,92,255,.1); border: 1px solid rgba(124,92,255,.35); border-radius: 10px; padding: 12px 14px; margin: 16px 0 4px; }
+.review-box strong { font-size: 13px; }
+.review-box small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+.fix-row { display: flex; gap: 8px; margin-top: 8px; }
+.fix-row input { flex: 1; background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; outline: none; font-size: 12.5px; }
+.fix-row input:focus { border-color: var(--accent2); }
 .card:hover { border-color: var(--accent); transform: translateY(-1px); }
 .card.dragging { opacity: .5; }
 .card-title { font-weight: 600; font-size: 13px; line-height: 1.3; }

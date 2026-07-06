@@ -127,6 +127,7 @@ function load() {
   const r = loadRaw();
   const ws = { ...WORKSPACE_DEFAULTS, ...r.profiles[r.activeProfileId] };
   cache = {
+    label: ws.label || null,
     profile: ws.profile,
     cvText: ws.cvText,
     cvFileName: ws.cvFileName,
@@ -144,6 +145,7 @@ function save() {
   const r = loadRaw();
   const c = load();
   r.profiles[r.activeProfileId] = {
+    label: c.label || undefined,
     profile: c.profile,
     cvText: c.cvText,
     cvFileName: c.cvFileName,
@@ -177,11 +179,20 @@ function listProfiles() {
   if (cache) save();
   return Object.entries(r.profiles).map(([id, w]) => ({
     id,
-    name: w.profile?.name || 'New profile',
+    name: w.label || w.profile?.name || 'New profile', // custom label wins
     title: w.profile?.title || 'no CV yet',
     applications: (w.applications || []).length,
     active: id === r.activeProfileId
   }));
+}
+
+function renameProfile(id, label) {
+  const r = loadRaw();
+  if (!r.profiles[id]) throw new Error('No such profile');
+  const clean = String(label || '').trim();
+  r.profiles[id].label = clean;
+  if (id === r.activeProfileId && cache) cache.label = clean; // keep flattened view in sync
+  persist();
 }
 
 function createProfile() {
@@ -235,5 +246,5 @@ function logActivity(text, type = 'info') {
 
 module.exports = {
   load, save, now, logActivity, isFirstRun, DATA_DIR, saveCvOriginal,
-  listProfiles, createProfile, switchProfile, deleteProfile
+  listProfiles, createProfile, switchProfile, deleteProfile, renameProfile
 };

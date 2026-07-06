@@ -3,7 +3,7 @@ const express = require('express');
 const multer = require('multer');
 
 const { load, save, now, logActivity, isFirstRun, DATA_DIR, saveCvOriginal,
-        listProfiles, createProfile, switchProfile, deleteProfile } = require('./db');
+        listProfiles, createProfile, switchProfile, deleteProfile, renameProfile } = require('./db');
 const llm = require('./llm');
 const email = require('./email');
 const { sourcesConfig } = require('./jobs');
@@ -171,6 +171,15 @@ app.post('/api/profiles', (req, res) => {
   res.json({ id, profiles: listProfiles() });
 });
 
+app.patch('/api/profiles/:id', (req, res) => {
+  try {
+    renameProfile(req.params.id, req.body.label);
+    res.json({ profiles: listProfiles() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/profiles/:id/activate', (req, res) => {
   try {
     switchProfile(req.params.id);
@@ -245,11 +254,14 @@ app.post('/api/applications/:id/tailor', async (req, res) => {
     if (!a) return res.status(404).json({ error: 'Not found' });
     if (!db.profile) return res.status(400).json({ error: 'Upload your CV first' });
 
-    a.tailored = await llm.tailorApplication(db.profile, db.cvText || '', a);
+    const feedback = String(req.body?.feedback || '').trim();
+    a.tailored = await llm.tailorApplication(db.profile, db.cvText || '', a, feedback);
     a.tailoredAt = now();
     if (['discovered', 'approved'].includes(a.status)) a.status = 'ready';
     save();
-    logActivity(`Tailored CV + email generated for ${a.title} at ${a.company}`, 'tailor');
+    logActivity(feedback
+      ? `Revised CV/email for ${a.title} at ${a.company} per your feedback: "${feedback.slice(0, 60)}${feedback.length > 60 ? '…' : ''}"`
+      : `Tailored CV + email generated for ${a.title} at ${a.company}`, 'tailor');
     res.json({ application: a });
   } catch (err) {
     console.error('tailor failed:', err);

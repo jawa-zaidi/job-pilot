@@ -68,10 +68,34 @@ async function chatJSON(messages, opts = {}) {
   return JSON.parse(out);
 }
 
+// Turn provider errors into plain, actionable messages
+function friendlyError(err) {
+  const m = String(err.message || err);
+  if (m.includes(' 429')) {
+    const wait = m.match(/try again in ([\dhm.\s]+)/i);
+    return new Error(`AI daily limit reached on the free tier. ${wait ? `Try again in ${wait[1].trim()}, or ` : ''}switch the model in Settings to "llama-3.1-8b-instant" (much higher limits), or add an OpenAI key.`);
+  }
+  if (m.includes(' 401') || m.includes(' 403')) return new Error('AI API key was rejected — check it in Settings.');
+  return new Error(m.slice(0, 200));
+}
+
+// For user-facing single actions: succeed, or throw a clear error when a key is
+// present (never silently return misleading mock output).
+async function strictJSON(messages, opts, mockFn) {
+  try {
+    const r = await chatJSON(messages, opts);
+    if (r) return r;          // no key configured → chat() returned null → mock
+  } catch (err) {
+    if (hasKey()) throw friendlyError(err);   // key present but failed → surface it
+    console.error('LLM failed (no key, using mock):', err.message);
+  }
+  return mockFn();
+}
+
 // ---------- Profile extraction ----------
 
 async function extractProfile(cvText) {
-  const result = await chatJSON([
+  return strictJSON([
     {
       role: 'system',
       content:
@@ -80,12 +104,7 @@ async function extractProfile(cvText) {
         '"top_achievements":[str],"summary":str,"target_roles":[str]}'
     },
     { role: 'user', content: `Extract the profile from this CV:\n\n${cvText.slice(0, 12000)}` }
-  ]).catch(err => {
-    console.error('extractProfile failed:', err.message);
-    return null;
-  });
-  if (result) return result;
-  return mockProfile(cvText);
+  ], {}, () => mockProfile(cvText));
 }
 
 function mockProfile(cvText) {
@@ -163,34 +182,35 @@ async function scoreJobs(profile, jobs) {
 
 // ---------- Tailored CV + email ----------
 
-async function tailorApplication(profile, cvText, job) {
-  const result = await chatJSON([
+async function tailorApplication(profile, cvText, job, feedback = '') {
+  const userMsg =
+    `Candidate profile:\n${JSON.stringify(profile)}\n\nOriginal CV text:\n${cvText.slice(0, 8000)}\n\n` +
+    `Job: ${job.title} at ${job.company}\nDescription:\n${(job.description || '').slice(0, 4000)}` +
+    (feedback && job.tailored ? `\n\nPrevious draft you must revise:\nEMAIL: ${job.tailored.email_body}\nCV: ${job.tailored.cv}` : '');
+  const messages = [
     {
       role: 'system',
       content:
-        'You are an expert CV writer and recruiter. Create an ATS-optimized CV (plain text, clear section ' +
-        'headers, quantified bullets, keywords mirrored from the job description) and a short, specific ' +
-        'application email tailored to this exact job — reference the company and role, connect 2-3 of the ' +
-        "candidate's real experiences to the job requirements. No placeholders like [Company]. " +
+        'You are an expert CV writer and recruiter. Only claim experience actually present in the ' +
+        "candidate's profile/CV — never invent skills or roles they don't have. Create an ATS-optimized CV " +
+        '(plain text, clear section headers, quantified bullets, keywords mirrored from the job description) ' +
+        'and a short, specific application email tailored to this exact job — reference the company and role, ' +
+        "connect 2-3 of the candidate's real experiences to the job requirements. No placeholders like [Company]. " +
         'Respond ONLY with JSON: {"cv":str,"email_subject":str,"email_body":str,"keywords_used":[str]}'
-    },
-    {
-      role: 'user',
-      content:
-        `Candidate profile:\n${JSON.stringify(profile)}\n\nOriginal CV text:\n${cvText.slice(0, 8000)}\n\n` +
-        `Job: ${job.title} at ${job.company}\nDescription:\n${(job.description || '').slice(0, 4000)}`
     }
-  ], { maxTokens: 4000, useCustomPrompt: true }).catch(err => {
-    console.error('tailorApplication failed:', err.message);
-    return null;
+  ];
+  // The user's revision request is the highest priority — put it up front and emphatic
+  if (feedback) messages.push({
+    role: 'system',
+    content: `REVISION REQUEST (highest priority — you MUST follow this exactly, even over other guidance): ${feedback}`
   });
-  if (result) return result;
-  return {
+  messages.push({ role: 'user', content: userMsg });
+  return strictJSON(messages, { maxTokens: 4000, useCustomPrompt: true }, () => ({
     cv: `${profile.name}\n${profile.email}\n\nSUMMARY\nTailored for ${job.title} at ${job.company}.\n\nSKILLS\n${(profile.skills || []).join(', ')}\n\n(mock mode — add an API key in Settings for a real tailored CV)`,
     email_subject: `Application for ${job.title} — ${profile.name}`,
     email_body: `Dear ${job.company} team,\n\nI'm applying for the ${job.title} role. My background in ${(profile.skills || []).slice(0, 3).join(', ')} fits your requirements.\n\n(mock mode — add an API key in Settings for a fully tailored email)\n\nBest regards,\n${profile.name}`,
     keywords_used: (profile.skills || []).slice(0, 5)
-  };
+  }));
 }
 
 // ---------- Follow-up email ----------

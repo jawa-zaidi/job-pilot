@@ -159,10 +159,13 @@ $('#smartBtn').addEventListener('click', async e => {
         : `No new matches right now — ${r.skipped} jobs were screened but didn't fit, and good ones may already be on your board. Try a manual search with a different term.`)
         + costSuffix(r.cost));
     } else if (action === 'generate') {
-      await api('/api/batch/approve', { method: 'POST' });
       const r = await api('/api/batch/generate', { method: 'POST' });
       state.lastRunCost = r.cost; state.lastRunLabel = 'generate';
-      toast(`Generated ${r.done} tailored CVs & emails${r.failed ? ` (${r.failed} failed)` : ''}. Review them (click a card), then hit Send.` + costSuffix(r.cost));
+      if (r.done === 0 && r.error) {
+        toast(r.error, true);
+      } else {
+        toast(`Generated ${r.done} tailored CVs & emails${r.failed ? ` (${r.failed} failed: ${esc(r.error)})` : ''}. Click each card to review — use "Ask AI to fix" if anything's off — then hit Send.` + costSuffix(r.cost));
+      }
     } else if (action === 'send') {
       const ready = state.applications.filter(a => a.status === 'ready').length;
       const real = state.applications.filter(a => a.status === 'ready' && a.recipientEmail).length;
@@ -203,14 +206,22 @@ function renderProfiles(profiles) {
   const sel = $('#profileSelect');
   sel.innerHTML = profiles.map(p =>
     `<option value="${esc(p.id)}" ${p.active ? 'selected' : ''}>${esc(p.name)} — ${esc(p.title)} (${p.applications})</option>`
-  ).join('') + '<option value="__new__">＋ New profile…</option>' +
+  ).join('') +
+    '<option value="__rename__">✎ Rename current profile…</option>' +
+    '<option value="__new__">＋ New profile…</option>' +
     (profiles.length > 1 ? '<option value="__delete__">🗑 Delete current profile…</option>' : '');
 }
 
 $('#profileSelect').addEventListener('change', async e => {
   const v = e.target.value;
   try {
-    if (v === '__new__') {
+    if (v === '__rename__') {
+      const active = (await api('/api/profiles')).profiles.find(p => p.active);
+      const label = prompt('Name this profile (e.g. "India Backend", "US Remote"):', active?.name || '');
+      if (label === null) { refresh(); return; }
+      await api(`/api/profiles/${active.id}`, { method: 'PATCH', body: { label } });
+      toast('Profile renamed');
+    } else if (v === '__new__') {
       if (!confirm('Create a new profile? Upload a different CV for it after switching.')) { refresh(); return; }
       await api('/api/profiles', { method: 'POST' });
       toast('New profile created — upload a CV for it');
@@ -429,6 +440,14 @@ function renderDrawer(a) {
     </div>
 
     ${t ? `
+      <div class="review-box">
+        <strong>Review — not happy with this draft?</strong>
+        <div class="fix-row">
+          <input type="text" id="fixInput" placeholder='e.g. "make the email shorter", "emphasize my fintech work", "drop the salary line"'>
+          <button class="btn btn-primary btn-sm" id="fixBtn">✏️ Ask AI to fix</button>
+        </div>
+        <small>The AI rewrites this CV &amp; email with your change. Repeat until you're happy, then Send.</small>
+      </div>
       <h3>Application email</h3>
       <pre class="doc">Subject: ${esc(t.email_subject)}\n\n${esc(t.email_body)}</pre>
       <h3>Tailored ATS CV ${t.keywords_used?.length ? `<span style="text-transform:none;letter-spacing:0">— keywords: ${esc(t.keywords_used.slice(0, 6).join(', '))}</span>` : ''}</h3>
@@ -458,6 +477,21 @@ function renderDrawer(a) {
       await refresh();
     } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = '⚡ Generate tailored CV & email'; }
   });
+
+  async function runFix() {
+    const feedback = $('#fixInput').value.trim();
+    if (!feedback) return toast('Type what to change first', true);
+    const btn = $('#fixBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Fixing…';
+    try {
+      await api(`/api/applications/${a.id}/tailor`, { method: 'POST', body: { feedback } });
+      toast('Revised — review the updated draft above');
+      await refresh();
+    } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = '✏️ Ask AI to fix'; }
+  }
+  $('#fixBtn')?.addEventListener('click', runFix);
+  $('#fixInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') runFix(); });
 
   $('#applyBtn')?.addEventListener('click', async e => {
     const btn = e.currentTarget;

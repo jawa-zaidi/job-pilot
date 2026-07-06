@@ -61,12 +61,14 @@ function approveAll() {
   return { approved: n };
 }
 
-// Step 2: generate tailored CV + email for every approved job
-async function generateAll({ statuses = ['approved'] } = {}) {
+// Step 2: generate tailored CV + email for the jobs the user kept in review
+// (Discovered). Only touches those — removed cards are already gone, and
+// already-generated (CV Ready) jobs are left alone.
+async function generateAll({ statuses = ['discovered', 'approved'] } = {}) {
   const db = load();
   const targets = db.applications.filter(a => statuses.includes(a.status));
   const runStart = costs.beginRun();
-  let done = 0, failed = 0;
+  let done = 0, failed = 0, lastError = '';
   for (const a of targets) {
     try {
       if (!a.tailored) a.tailored = await llm.tailorApplication(db.profile, db.cvText || '', a);
@@ -76,13 +78,15 @@ async function generateAll({ statuses = ['approved'] } = {}) {
       done++;
     } catch (err) {
       failed++;
+      lastError = err.message;
       console.error(`generate failed for ${a.title}:`, err.message);
+      if (err.message.includes('daily limit')) break; // no point hammering a rate-limited API
     }
   }
   const cost = costs.endRun(runStart);
   if (done || failed) logActivity(`Batch generate: ${done} tailored CVs & emails ready${failed ? `, ${failed} failed` : ''} · cost ${costs.fmt(cost.usd)}`, 'tailor');
   save();
-  return { done, failed, total: targets.length, cost };
+  return { done, failed, total: targets.length, cost, error: failed ? lastError : '' };
 }
 
 // Step 3: send everything that's ready
@@ -123,15 +127,14 @@ async function sendAll({ skipInsights = false } = {}) {
 async function runAutoCycle(target) {
   const runStart = costs.beginRun();
   const fetch = await fetchBatch(target);
-  const approved = approveAll();
-  const generated = await generateAll();
+  const generated = await generateAll(); // tailors discovered directly
   const sendResult = await sendAll({ skipInsights: true });
   const cost = costs.endRun(runStart);
   logActivity(`Auto cycle complete: ${fetch.added} found, ${generated.done} tailored, ${sendResult.sent + sendResult.simulated} applications sent · cost ${costs.fmt(cost.usd)}`, 'apply');
   // auto feedback: one report per automated run (when anything was sent)
   await require('./insights').afterAutoRun(sendResult.sent + sendResult.simulated)
     .catch(err => console.error('insights hook failed:', err.message));
-  return { fetch, approved, generated, sendResult, cost };
+  return { fetch, generated, sendResult, cost };
 }
 
 module.exports = { fetchBatch, approveAll, generateAll, sendAll, runAutoCycle, dailyTarget };
