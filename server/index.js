@@ -2,7 +2,7 @@ const path = require('path');
 const express = require('express');
 const multer = require('multer');
 
-const { load, save, now, logActivity, isFirstRun, DATA_DIR,
+const { load, save, now, logActivity, isFirstRun, DATA_DIR, saveCvOriginal,
         listProfiles, createProfile, switchProfile, deleteProfile } = require('./db');
 const llm = require('./llm');
 const email = require('./email');
@@ -48,6 +48,7 @@ app.post('/api/cv', upload.single('cv'), async (req, res) => {
     const db = load();
     db.cvText = text;
     db.profile = profile;
+    saveCvOriginal(req.file.originalname, req.file.buffer); // keep the actual CV file in the profile's folder
     save();
     logActivity(`CV uploaded (${req.file.originalname}) — profile extracted: ${profile.skills.length} skills found`, 'cv');
     res.json({ profile, mockMode: !llm.hasKey() });
