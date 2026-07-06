@@ -106,6 +106,15 @@ function mockProfile(cvText) {
 // ---------- Job match scoring ----------
 
 async function scoreJobs(profile, jobs) {
+  // score in chunks — one giant call truncates and loses accuracy
+  const CHUNK = 15;
+  if (jobs.length > CHUNK) {
+    const map = {};
+    for (let i = 0; i < jobs.length; i += CHUNK) {
+      Object.assign(map, await scoreJobs(profile, jobs.slice(i, i + CHUNK)));
+    }
+    return map;
+  }
   const jobList = jobs.map(j => ({
     id: j.id,
     title: j.title,

@@ -8,17 +8,21 @@ const { searchJobs } = require('./jobs');
 const MIN_SCORE = 30;      // discard poor fits
 const CHECK_EVERY_MS = 15 * 60 * 1000;
 
-async function discover(query, { activityLabel = 'Job search' } = {}) {
+async function discover(query, { activityLabel = 'Job search', limit = 10, maxAdd = Infinity } = {}) {
   const db = load();
   if (!db.profile) throw new Error('Upload your CV first');
   const q = (query || db.profile.target_roles?.[0] || db.profile.title || 'software').trim();
 
-  const { jobs, source } = await searchJobs(q, 10);
+  const { jobs, source } = await searchJobs(q, limit);
   const fresh = jobs.filter(j => !db.applications.some(a => a.id === j.id));
   const scores = fresh.length ? await llm.scoreJobs(db.profile, fresh) : {};
 
+  // best matches first, so a maxAdd cap keeps the strongest ones
+  fresh.sort((a, b) => (scores[String(b.id)]?.score || 0) - (scores[String(a.id)]?.score || 0));
+
   let added = 0, skipped = 0;
   for (const job of fresh) {
+    if (added >= maxAdd) break;
     const s = scores[String(job.id)] || { score: 50, reasons: [] };
     if (s.score < MIN_SCORE) { skipped++; continue; }
     db.applications.push({

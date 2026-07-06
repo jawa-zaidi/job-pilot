@@ -28,8 +28,11 @@ async function fetchBatch(target) {
   for (const q of queries) {
     const pending = load().applications.filter(a => ['discovered', 'approved', 'ready'].includes(a.status)).length;
     if (pending >= target) break;
+    // pull more per source the further we are from the target, but never add past it
+    const remaining = target - pending;
+    const limit = Math.min(25, Math.max(10, remaining));
     try {
-      const r = await discover(q, { activityLabel: 'Batch fetch' });
+      const r = await discover(q, { activityLabel: 'Batch fetch', limit, maxAdd: remaining });
       added += r.added;
       skipped += r.skipped;
       used.push(q);
