@@ -8,6 +8,10 @@
 </head>
 <body>
 <div class="app">
+  <!-- Single persistent file input, kept OUTSIDE any re-rendered container so
+       every `for="cvInput"` label (sidebar, profile editor, settings) works. -->
+  <input type="file" id="cvInput" accept=".pdf,.docx,.txt,.md" hidden>
+
   <aside class="sidebar">
     <div class="logo">✈️ <span>JobPilot</span></div>
 
@@ -18,7 +22,6 @@
         <div class="empty-profile">
           <p>Upload your CV once — JobPilot extracts your skills and tailors every application.</p>
           <label class="btn btn-primary" for="cvInput">Upload CV</label>
-          <input type="file" id="cvInput" accept=".pdf,.docx,.txt,.md" hidden>
         </div>
       </div>
     </div>
