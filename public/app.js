@@ -539,23 +539,41 @@ $('#reportRunBtn').addEventListener('click', async e => {
   btn.textContent = 'Generate report now';
 });
 
-// ---------- Profile editor ----------
+// ---------- Profile editor (friendly form, no JSON) ----------
+
+let editingProfile = null; // keeps fields the form doesn't show
 
 function openProfileEditor(profile) {
-  $('#profileEditor').value = JSON.stringify(profile, null, 2);
+  editingProfile = profile || {};
+  $('#pfName').value = profile.name || '';
+  $('#pfEmail').value = profile.email || '';
+  $('#pfTitle').value = profile.title || '';
+  $('#pfYears').value = profile.years_experience ?? '';
+  $('#pfSkills').value = (profile.skills || []).join(', ');
+  $('#pfRoles').value = (profile.target_roles || []).join(', ');
+  $('#pfSummary').value = profile.summary || '';
+  $('#pfAchievements').value = (profile.top_achievements || []).join('\n');
   $('#profileOverlay').classList.remove('hidden');
 }
 
 $('#profileClose').addEventListener('click', () => $('#profileOverlay').classList.add('hidden'));
 $('#profileOverlay').addEventListener('click', e => { if (e.target.id === 'profileOverlay') $('#profileOverlay').classList.add('hidden'); });
 
+const splitList = (v, sep) => v.split(sep).map(x => x.trim()).filter(Boolean);
+
 $('#profileSave').addEventListener('click', async () => {
-  let profile;
-  try {
-    profile = JSON.parse($('#profileEditor').value);
-  } catch {
-    return toast('Invalid JSON — check for missing quotes or commas', true);
-  }
+  const profile = {
+    ...editingProfile, // preserve anything the AI extracted that the form doesn't show
+    name: $('#pfName').value.trim(),
+    email: $('#pfEmail').value.trim(),
+    title: $('#pfTitle').value.trim(),
+    years_experience: Number($('#pfYears').value) || 0,
+    skills: splitList($('#pfSkills').value, ','),
+    target_roles: splitList($('#pfRoles').value, ','),
+    summary: $('#pfSummary').value.trim(),
+    top_achievements: splitList($('#pfAchievements').value, '\n')
+  };
+  if (!profile.name) return toast('Please fill in your name', true);
   try {
     await api('/api/profile', { method: 'PUT', body: { profile } });
     toast('Profile saved');
@@ -563,6 +581,17 @@ $('#profileSave').addEventListener('click', async () => {
     refresh();
   } catch (err) { toast(err.message, true); }
 });
+
+// ---------- Collapsible sidebar ----------
+
+function applyNavState() {
+  document.body.classList.toggle('nav-collapsed', localStorage.getItem('jp_nav') === 'closed');
+}
+$('#navToggle').addEventListener('click', () => {
+  localStorage.setItem('jp_nav', document.body.classList.contains('nav-collapsed') ? 'open' : 'closed');
+  applyNavState();
+});
+applyNavState();
 
 // ---------- Settings modal ----------
 
@@ -580,6 +609,7 @@ async function openSettings(welcome = false) {
   $('#srcLinkedin').checked = s.sources.linkedin;
   $('#setApifyToken').value = '';
   $('#setApifyToken').placeholder = s.apifyTokenSet ? `configured ✓ (${s.apifyTokenMasked}) — paste to replace` : 'apify_api_…';
+  $('#setJobLocation').value = s.jobLocation || '';
   $('#setProvider').value = s.provider;
   $('#setModel').value = s.model;
   $('#setModel').placeholder = s.activeModel;
@@ -630,7 +660,8 @@ $('#settingsSave').addEventListener('click', async () => {
         linkedin: $('#srcLinkedin').checked,
         naukri: false
       },
-      apifyToken: $('#setApifyToken').value
+      apifyToken: $('#setApifyToken').value,
+      jobLocation: $('#setJobLocation').value
     }});
     toast('Settings saved');
     $('#settingsOverlay').classList.add('hidden');

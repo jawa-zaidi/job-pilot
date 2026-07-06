@@ -320,7 +320,8 @@ app.get('/api/settings', (req, res) => {
       naukri: sourcesConfig().naukri
     },
     apifyTokenSet: !!(s.apifyToken),
-    apifyTokenMasked: s.apifyToken ? s.apifyToken.slice(0, 10) + '…' : ''
+    apifyTokenMasked: s.apifyToken ? s.apifyToken.slice(0, 10) + '…' : '',
+    jobLocation: s.jobLocation || ''
   });
 });
 
@@ -338,6 +339,7 @@ app.post('/api/settings', (req, res) => {
     };
   }
   if (apifyToken !== undefined && apifyToken.trim()) db.settings.apifyToken = apifyToken.trim();
+  if (req.body.jobLocation !== undefined) db.settings.jobLocation = String(req.body.jobLocation).trim();
   if (groqKey !== undefined && groqKey.trim()) db.settings.groqKey = groqKey.trim();
   if (openaiKey !== undefined && openaiKey.trim()) db.settings.openaiKey = openaiKey.trim();
   if (provider !== undefined) db.settings.provider = provider === 'openai' ? 'openai' : 'groq';

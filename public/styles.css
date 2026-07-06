@@ -23,7 +23,11 @@ body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, 
   border-right: 1px solid var(--border); padding: 20px 16px;
   display: flex; flex-direction: column; gap: 22px;
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  transition: width .22s ease, padding .22s ease;
 }
+body.nav-collapsed .sidebar { width: 0; padding: 20px 0; border-right: none; overflow: hidden; }
+.nav-toggle { font-size: 15px; padding: 6px 11px; margin-right: 4px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .logo { font-size: 20px; font-weight: 700; letter-spacing: .3px; }
 .logo span { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .side-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 8px; }

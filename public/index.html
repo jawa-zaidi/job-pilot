@@ -47,6 +47,7 @@
 
   <main class="main">
     <header class="topbar">
+      <button id="navToggle" class="btn btn-ghost btn-sm nav-toggle" title="Hide/show side panel">☰</button>
       <h1>Dashboard</h1>
       <div id="toast" class="toast"></div>
     </header>
@@ -157,6 +158,11 @@
       <div><strong>Naukri</strong> <span class="beta">coming soon</span><br>
       <small>Naukri has no official API — we'll add it via scraping in an update.</small></div>
     </label>
+    <label class="field">
+      <span>Preferred job location <small style="color:var(--muted)">(optional — e.g. "India", "Bangalore", "Remote")</small></span>
+      <input type="text" id="setJobLocation" placeholder="anywhere">
+      <small>Used by the LinkedIn search to target the right region.</small>
+    </label>
 
     <h3>AI provider &amp; model</h3>
     <label class="field">
@@ -237,9 +243,29 @@
     <button class="drawer-close" id="profileClose">✕</button>
     <h2>Edit your profile</h2>
     <p class="modal-sub">Extracted from your CV — edit anything and save. The AI uses this for scoring, CVs and emails.</p>
+    <div class="two-col">
+      <label class="field"><span>Name</span><input type="text" id="pfName"></label>
+      <label class="field"><span>Email</span><input type="email" id="pfEmail"></label>
+    </div>
+    <div class="two-col">
+      <label class="field"><span>Current title</span><input type="text" id="pfTitle"></label>
+      <label class="field"><span>Years of experience</span><input type="number" id="pfYears" min="0" max="60"></label>
+    </div>
     <label class="field">
-      <textarea id="profileEditor" rows="18" spellcheck="false"></textarea>
-      <small>JSON format — keep the field names, edit the values.</small>
+      <span>Skills <small style="color:var(--muted)">(separate with commas)</small></span>
+      <textarea id="pfSkills" rows="3" placeholder="JavaScript, React, Node.js, SQL"></textarea>
+    </label>
+    <label class="field">
+      <span>Roles you're looking for <small style="color:var(--muted)">(separate with commas — used for job searches)</small></span>
+      <textarea id="pfRoles" rows="2" placeholder="Senior Software Engineer, Full Stack Developer"></textarea>
+    </label>
+    <label class="field">
+      <span>Short summary about you</span>
+      <textarea id="pfSummary" rows="4"></textarea>
+    </label>
+    <label class="field">
+      <span>Top achievements <small style="color:var(--muted)">(one per line)</small></span>
+      <textarea id="pfAchievements" rows="4" placeholder="Cut API latency 60% at FinEdge&#10;Led a team of 3 engineers"></textarea>
     </label>
     <div class="drawer-actions">
       <button class="btn btn-primary" id="profileSave">Save profile</button>

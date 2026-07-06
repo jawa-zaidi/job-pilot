@@ -130,10 +130,16 @@ let linkedinPausedUntil = 0; // don't retry every query after a hard failure
 async function searchLinkedInApify(query, limit, token) {
   if (Date.now() < linkedinPausedUntil) throw new Error('LinkedIn paused after a recent error (retries soon)');
   const url = `https://api.apify.com/v2/acts/harvestapi~linkedin-job-search/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=120`;
+  const jobLocation = (load().settings?.jobLocation || '').trim();
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ searchQuery: query, maxItems: Math.min(limit, 25) }),
+    body: JSON.stringify({
+      jobTitles: [query],
+      maxItems: Math.min(limit, 25),
+      sortBy: 'date', // newest first — apply as soon as they're out
+      ...(jobLocation ? { locations: [jobLocation] } : {})
+    }),
     signal: AbortSignal.timeout(150000)
   });
   const bodyText = await res.text().catch(() => '');
@@ -153,16 +159,18 @@ async function searchLinkedInApify(query, limit, token) {
     throw new Error(msg);
   }
   const items = JSON.parse(bodyText);
+  // harvestapi schema: title, company{name}, linkedinUrl, location{linkedinText},
+  // salary{text}, postedDate, descriptionText, hiringTeam[]
   return (Array.isArray(items) ? items : []).slice(0, limit).map(j => ({
-    id: `linkedin-${crypto.createHash('md5').update(String(j.jobUrl || j.url || j.link || j.id || String(j.title) + String(j.companyName))).digest('hex').slice(0, 10)}`,
+    id: `linkedin-${crypto.createHash('md5').update(String(j.linkedinUrl || j.id || String(j.title))).digest('hex').slice(0, 10)}`,
     source: 'LinkedIn',
     title: j.title || 'Untitled role',
-    company: j.companyName || j.company?.name || j.company || 'Unknown',
-    location: j.location?.linkedinText || j.location || '',
-    url: j.jobUrl || j.url || j.link || '',
-    salary: j.salaryText || j.salary || '',
-    publishedAt: j.postedDate || j.publishedAt || '',
-    description: stripHtml(j.descriptionText || j.description || '').slice(0, 5000)
+    company: j.company?.name || 'Unknown',
+    location: j.location?.linkedinText || '',
+    url: j.linkedinUrl || '',
+    salary: j.salary?.text || '',
+    publishedAt: j.postedDate || '',
+    description: stripHtml(j.descriptionText || '').slice(0, 5000)
   }));
 }
 
