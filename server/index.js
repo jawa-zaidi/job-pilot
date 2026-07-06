@@ -400,7 +400,8 @@ app.get('/api/stats', (req, res) => {
     provider: llm.providerInfo(),
     mode: (db.settings?.mode) || 'manual',
     smtpConfigured: email.isConfigured(),
-    hasProfile: !!db.profile
+    hasProfile: !!db.profile,
+    costTotalUSD: require('./costs').totals().totalUSD
   });
 });
 

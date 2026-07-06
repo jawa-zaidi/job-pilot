@@ -28,6 +28,9 @@ async function sendEmail({ to, subject, body }) {
     if (String(err.message).includes('535') || err.code === 'EAUTH') {
       throw new Error(`Gmail rejected the sign-in for ${s.smtpUser}. Double-check in Settings: it must be an App Password (myaccount.google.com/apppasswords), not your normal password, and 2-Step Verification must be ON for that account.`);
     }
+    if (err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT' || err.code === 'ECONNREFUSED' || err.code === 'ESOCKET') {
+      throw new Error(`Could not reach Gmail's mail server (${err.code}). Your network or firewall may be blocking outbound email (ports 465/587). Try a different network, or use the app in simulated mode.`);
+    }
     throw err;
   }
   return { simulated: false, to };

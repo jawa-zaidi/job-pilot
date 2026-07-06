@@ -4,6 +4,7 @@
 const { load, save, now, logActivity } = require('./db');
 const llm = require('./llm');
 const emailer = require('./email');
+const costs = require('./costs');
 const { discover } = require('./discovery');
 
 function dailyTarget() {
@@ -23,6 +24,7 @@ async function fetchBatch(target) {
       .filter(Boolean).map(q => String(q).trim())
   )];
 
+  const runStart = costs.beginRun();
   let added = 0, skipped = 0;
   const used = [];
   for (const q of queries) {
@@ -40,9 +42,11 @@ async function fetchBatch(target) {
       console.error(`batch fetch "${q}" failed:`, err.message);
     }
   }
+  const cost = costs.endRun(runStart);
   const discovered = load().applications.filter(a => a.status === 'discovered').length;
-  logActivity(`Batch fetch done: ${added} new matches (${skipped} poor fits filtered) across ${used.length} searches`, 'search');
-  return { added, skipped, queries: used, discovered, target };
+  logActivity(`Batch fetch done: ${added} new matches (${skipped} poor fits filtered) across ${used.length} searches · cost ${costs.fmt(cost.usd)}`, 'search');
+  save();
+  return { added, skipped, queries: used, discovered, target, cost };
 }
 
 // Step 1b: approve everything still in "discovered" (user removes bad ones first)
@@ -61,6 +65,7 @@ function approveAll() {
 async function generateAll({ statuses = ['approved'] } = {}) {
   const db = load();
   const targets = db.applications.filter(a => statuses.includes(a.status));
+  const runStart = costs.beginRun();
   let done = 0, failed = 0;
   for (const a of targets) {
     try {
@@ -74,8 +79,10 @@ async function generateAll({ statuses = ['approved'] } = {}) {
       console.error(`generate failed for ${a.title}:`, err.message);
     }
   }
-  if (done || failed) logActivity(`Batch generate: ${done} tailored CVs & emails ready${failed ? `, ${failed} failed` : ''}`, 'tailor');
-  return { done, failed, total: targets.length };
+  const cost = costs.endRun(runStart);
+  if (done || failed) logActivity(`Batch generate: ${done} tailored CVs & emails ready${failed ? `, ${failed} failed` : ''} · cost ${costs.fmt(cost.usd)}`, 'tailor');
+  save();
+  return { done, failed, total: targets.length, cost };
 }
 
 // Step 3: send everything that's ready
@@ -108,20 +115,23 @@ async function sendAll({ skipInsights = false } = {}) {
     await require('./insights').afterApplies(sent + simulated)
       .catch(err => console.error('insights hook failed:', err.message));
   }
-  return { sent, simulated, failed, total: targets.length };
+  // sending itself is free (Gmail); cost object kept for a uniform shape
+  return { sent, simulated, failed, total: targets.length, cost: { usd: 0, ai: 0, source: 0 } };
 }
 
 // Auto mode: the whole cycle with no human review
 async function runAutoCycle(target) {
+  const runStart = costs.beginRun();
   const fetch = await fetchBatch(target);
   const approved = approveAll();
   const generated = await generateAll();
   const sendResult = await sendAll({ skipInsights: true });
-  logActivity(`Auto cycle complete: ${fetch.added} found, ${generated.done} tailored, ${sendResult.sent + sendResult.simulated} applications sent`, 'apply');
+  const cost = costs.endRun(runStart);
+  logActivity(`Auto cycle complete: ${fetch.added} found, ${generated.done} tailored, ${sendResult.sent + sendResult.simulated} applications sent · cost ${costs.fmt(cost.usd)}`, 'apply');
   // auto feedback: one report per automated run (when anything was sent)
   await require('./insights').afterAutoRun(sendResult.sent + sendResult.simulated)
     .catch(err => console.error('insights hook failed:', err.message));
-  return { fetch, approved, generated, sendResult };
+  return { fetch, approved, generated, sendResult, cost };
 }
 
 module.exports = { fetchBatch, approveAll, generateAll, sendAll, runAutoCycle, dailyTarget };

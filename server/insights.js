@@ -48,6 +48,7 @@ function snapshot() {
     avgMatchScoreApplied: applied.length ? Math.round(applied.reduce((n, a) => n + (a.matchScore || 0), 0) / applied.length) : 0,
     withRecruiterEmail: applied.filter(a => a.recipientEmail).length,
     simulatedSends: applied.filter(a => a.applicationSent?.simulated).length,
+    totalApiCostUSD: Number((require('./costs').totals().totalUSD || 0).toFixed(4)),
     replyRateByMatchBand: byBand,
     replyRateBySource: bySource,
     recentApplications: applied.slice(0, 25).map(a => ({

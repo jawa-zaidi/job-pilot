@@ -10,7 +10,7 @@ const COLUMNS = [
   { id: 'closed',     label: 'Closed',     statuses: ['closed', 'rejected'], color: '#5a6577' }
 ];
 
-let state = { applications: [], stats: null, openId: null, settings: null };
+let state = { applications: [], stats: null, openId: null, settings: null, lastRunCost: null, lastRunLabel: '' };
 let filters = { stage: 'all', from: '', to: '' };
 
 const $ = s => document.querySelector(s);
@@ -43,6 +43,20 @@ function timeAgo(ts) {
   const d = new Date(ts);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
          d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtCost(usd) {
+  if (!usd) return '$0.00';
+  if (usd < 0.01) return '<$0.01';
+  return '$' + usd.toFixed(usd < 1 ? 3 : 2);
+}
+// appended to a toast after a run
+function costSuffix(cost) {
+  if (!cost || !cost.usd) return '';
+  const parts = [];
+  if (cost.ai) parts.push(`AI ${fmtCost(cost.ai)}`);
+  if (cost.source) parts.push(`sources ${fmtCost(cost.source)}`);
+  return `  ·  cost ${fmtCost(cost.usd)}${parts.length ? ` (${parts.join(', ')})` : ''}`;
 }
 
 function stageOf(a) {
@@ -80,6 +94,7 @@ async function refresh() {
   renderStats(stats);
   renderBoard();
   renderSmartButton();
+  renderCostLine();
   renderProfiles(profilesData.profiles);
   renderActivity(stats.activity);
   renderProfileCard();
@@ -122,6 +137,13 @@ function renderSmartButton() {
   }
 }
 
+function renderCostLine() {
+  const total = state.stats ? state.stats.costTotalUSD : 0;
+  const last = state.lastRunCost && state.lastRunCost.usd
+    ? `<span class="last">last ${state.lastRunLabel}: ${fmtCost(state.lastRunCost.usd)}</span> · ` : '';
+  $('#costLine').innerHTML = `${last}API cost so far: <b>${fmtCost(total)}</b>`;
+}
+
 $('#smartBtn').addEventListener('click', async e => {
   const btn = e.currentTarget;
   const action = btn.dataset.action;
@@ -131,13 +153,16 @@ $('#smartBtn').addEventListener('click', async e => {
   try {
     if (action === 'fetch') {
       const r = await api('/api/batch/fetch', { method: 'POST', body: {} });
-      toast(r.added
+      state.lastRunCost = r.cost; state.lastRunLabel = 'find';
+      toast((r.added
         ? `Found ${r.added} good new matches (${r.skipped} poor fits filtered). Remove any you don't like (✕), then hit the button again.`
-        : `No new matches right now — ${r.skipped} jobs were screened but didn't fit, and good ones may already be on your board. Try a manual search with a different term.`);
+        : `No new matches right now — ${r.skipped} jobs were screened but didn't fit, and good ones may already be on your board. Try a manual search with a different term.`)
+        + costSuffix(r.cost));
     } else if (action === 'generate') {
       await api('/api/batch/approve', { method: 'POST' });
       const r = await api('/api/batch/generate', { method: 'POST' });
-      toast(`Generated ${r.done} tailored CVs & emails${r.failed ? ` (${r.failed} failed)` : ''}. Review them (click a card), then hit Send.`);
+      state.lastRunCost = r.cost; state.lastRunLabel = 'generate';
+      toast(`Generated ${r.done} tailored CVs & emails${r.failed ? ` (${r.failed} failed)` : ''}. Review them (click a card), then hit Send.` + costSuffix(r.cost));
     } else if (action === 'send') {
       const ready = state.applications.filter(a => a.status === 'ready').length;
       const real = state.applications.filter(a => a.status === 'ready' && a.recipientEmail).length;
@@ -145,7 +170,7 @@ $('#smartBtn').addEventListener('click', async e => {
         btn.disabled = false; btn.textContent = oldText; return;
       }
       const r = await api('/api/batch/send', { method: 'POST' });
-      toast(`Sent: ${r.sent} real, ${r.simulated} simulated${r.failed ? `, ${r.failed} failed` : ''} — follow-ups scheduled for day 3, 5, 10.`);
+      toast(`Sent: ${r.sent} real, ${r.simulated} simulated${r.failed ? `, ${r.failed} failed` : ''} — follow-ups scheduled for day 3, 5, 10.` + costSuffix(r.cost));
     }
     await refresh();
   } catch (err) { toast(err.message, true); }

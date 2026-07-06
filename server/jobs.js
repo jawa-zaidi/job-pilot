@@ -208,8 +208,10 @@ async function searchJobs(query, limit = 10) {
   }
   if (cfg.linkedin && cfg.apifyToken) {
     try {
-      jobs.push(...await searchLinkedInApify(query, limit, cfg.apifyToken));
+      const li = await searchLinkedInApify(query, limit, cfg.apifyToken);
+      jobs.push(...li);
       used.push('LinkedIn');
+      try { require('./costs').recordSource('LinkedIn', li.length); } catch { /* best-effort */ }
     } catch (err) {
       console.error('LinkedIn (Apify) fetch failed:', err.message);
       // surface actionable problems (like the one-time approval) to the user once

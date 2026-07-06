@@ -54,6 +54,11 @@ async function chat(messages, { json = false, maxTokens = 2048, useCustomPrompt 
     throw new Error(`${c.label} API ${res.status}: ${body.slice(0, 300)}`);
   }
   const data = await res.json();
+  if (data.usage) {
+    try {
+      require('./costs').recordLLM(c.model, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0);
+    } catch { /* cost tracking is best-effort */ }
+  }
   return data.choices[0].message.content;
 }
 
