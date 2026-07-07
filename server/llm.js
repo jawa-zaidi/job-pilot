@@ -1,10 +1,14 @@
-// LLM client — supports Groq and OpenAI (ChatGPT), selectable in Settings,
-// with a model override and a user-editable custom system prompt that is
-// injected into scoring / CV / email generation. Falls back to deterministic
-// mock output when no API key is configured.
+// LLM client — supports Groq, OpenAI (ChatGPT) and Anthropic (Claude),
+// selectable in Settings, with a model override and a user-editable custom
+// system prompt that is injected into scoring / CV / email generation. Falls
+// back to deterministic mock output when no API key is configured.
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const { load } = require('./db');
 const P = require('./prompts'); // all quality-critical system prompts live in prompts.js
+
+// One hung LLM request must not stall an entire batch generate; generation can
+// be slow, so the ceiling is generous.
+const LLM_TIMEOUT_MS = 60000;
 
 const PROVIDERS = {
   groq: {
@@ -18,15 +22,33 @@ const PROVIDERS = {
     url: 'https://api.openai.com/v1/chat/completions',
     defaultModel: 'gpt-4o-mini',
     envKey: 'OPENAI_API_KEY'
+  },
+  anthropic: {
+    label: 'Anthropic (Claude)',
+    url: 'https://api.anthropic.com/v1/messages',
+    defaultModel: 'claude-haiku-4-5-20251001',
+    envKey: 'ANTHROPIC_API_KEY',
+    anthropic: true // uses the Messages API shape, not the OpenAI one
   }
 };
 
 function cfg() {
   const s = load().settings || {};
-  const name = s.provider === 'openai' ? 'openai' : 'groq';
+  const name = ['openai', 'anthropic'].includes(s.provider) ? s.provider : 'groq';
   const p = PROVIDERS[name];
-  const key = (name === 'openai' ? s.openaiKey : s.groqKey) || process.env[p.envKey] || '';
-  return { provider: name, label: p.label, url: p.url, key, model: (s.model || '').trim() || p.defaultModel };
+  const keyBySetting = { groq: s.groqKey, openai: s.openaiKey, anthropic: s.anthropicKey };
+  const key = keyBySetting[name] || process.env[p.envKey] || '';
+  return { provider: name, label: p.label, url: p.url, key, model: (s.model || '').trim() || p.defaultModel, anthropic: !!p.anthropic };
+}
+
+// Anthropic has no JSON mode; models occasionally wrap JSON in prose or code
+// fences, so pull the outermost JSON object/array out of the text.
+function extractJsonText(text) {
+  const s = String(text || '');
+  const start = s.search(/[{[]/);
+  if (start < 0) return s;
+  const end = Math.max(s.lastIndexOf('}'), s.lastIndexOf(']'));
+  return end > start ? s.slice(start, end + 1) : s;
 }
 
 function hasKey() { return !!cfg().key; }
@@ -55,27 +77,77 @@ async function chat(messages, { json = false, maxTokens = 2048, promptKinds = nu
   // The user's standing instructions are concatenated INTO the system prompt
   // under a highest-priority header — they override the built-in guidance.
   const custom = promptKinds ? promptFor(promptKinds) : '';
-  const system = { role: 'system', content: P.withUserInstructions(messages[0].content, custom) };
-  const res = await fetch(c.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.key}` },
-    body: JSON.stringify({
-      model: c.model,
-      messages: [system, ...messages.slice(1)],
-      temperature: 0.4,
-      max_tokens: maxTokens,
-      ...(json ? { response_format: { type: 'json_object' } } : {})
-    })
-  });
+  const systemText = P.withUserInstructions(messages[0].content, custom);
+  const rest = messages.slice(1);
+
+  let res;
+  try {
+    if (c.anthropic) {
+      // Anthropic Messages API: system is a top-level field, max_tokens is
+      // required, there is no response_format. Any extra system-role turns
+      // (e.g. a revision request) are folded into the system field; JSON mode
+      // is requested via the prompt and parsed out of the text.
+      const extraSystem = rest.filter(m => m.role === 'system').map(m => m.content);
+      const convo = rest.filter(m => m.role !== 'system').map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content
+      }));
+      const fullSystem = [systemText, ...extraSystem]
+        .concat(json ? ['Respond with ONLY a single JSON object — no prose, no markdown code fences.'] : [])
+        .join('\n\n');
+      res = await fetch(c.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': c.key,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: c.model,
+          max_tokens: maxTokens,
+          temperature: 0.4,
+          system: fullSystem,
+          messages: convo
+        }),
+        signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
+      });
+    } else {
+      const system = { role: 'system', content: systemText };
+      res = await fetch(c.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.key}` },
+        body: JSON.stringify({
+          model: c.model,
+          messages: [system, ...rest],
+          temperature: 0.4,
+          max_tokens: maxTokens,
+          ...(json ? { response_format: { type: 'json_object' } } : {})
+        }),
+        signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
+      });
+    }
+  } catch (err) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      throw new Error(`${c.label} API timed out after ${LLM_TIMEOUT_MS / 1000}s — try again, or switch model/provider in Settings.`);
+    }
+    throw err;
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`${c.label} API ${res.status}: ${body.slice(0, 300)}`);
   }
   const data = await res.json();
-  if (data.usage) {
-    try {
-      require('./costs').recordLLM(c.model, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0);
-    } catch { /* cost tracking is best-effort */ }
+  // Usage shapes differ: OpenAI/Groq use prompt/completion_tokens, Anthropic
+  // uses input/output_tokens. Cost tracking is best-effort.
+  const u = data.usage || {};
+  const promptToks = u.prompt_tokens ?? u.input_tokens ?? 0;
+  const completionToks = u.completion_tokens ?? u.output_tokens ?? 0;
+  if (promptToks || completionToks) {
+    try { require('./costs').recordLLM(c.model, promptToks, completionToks); } catch { /* best-effort */ }
+  }
+  if (c.anthropic) {
+    const text = (data.content || []).map(b => b.text || '').join('');
+    return json ? extractJsonText(text) : text;
   }
   return data.choices[0].message.content;
 }
