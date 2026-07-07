@@ -15,6 +15,11 @@ const { processFollowUps, startScheduler, FOLLOW_UP_DAYS } = require('./followup
 
 const app = express();
 const PORT = process.env.PORT || 4310;
+// Bind to loopback by default so the CV, settings and Gmail send capability are
+// not exposed to everyone on the local network. Opt in to LAN access with
+// HOST=0.0.0.0 or JOBPILOT_LAN=1 (a warning is logged when LAN mode is on).
+const LAN = process.env.JOBPILOT_LAN === '1' || (process.env.HOST && process.env.HOST !== '127.0.0.1' && process.env.HOST !== 'localhost');
+const HOST = process.env.HOST || (LAN ? '0.0.0.0' : '127.0.0.1');
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -371,7 +376,7 @@ app.post('/api/applications/:id/apply', async (req, res) => {
     const attachments = [];
     try {
       attachments.push({
-        filename: cvFileName(db.profile?.name, a.company),
+        filename: cvFileName(db.profile?.name, a.company, a.title),
         content: await cvToPdfBuffer(a.tailored.cv, { name: db.profile?.name })
       });
     } catch (err) { console.error('CV PDF failed, sending text fallback:', err.message); }
@@ -408,6 +413,7 @@ app.get('/api/settings', (req, res) => {
   const info = llm.providerInfo();
   const groqKey = s.groqKey || process.env.GROQ_API_KEY || '';
   const openaiKey = s.openaiKey || process.env.OPENAI_API_KEY || '';
+  const anthropicKey = s.anthropicKey || process.env.ANTHROPIC_API_KEY || '';
   res.json({
     provider: info.provider,
     model: s.model || '',
@@ -416,6 +422,8 @@ app.get('/api/settings', (req, res) => {
     groqKeyMasked: groqKey ? groqKey.slice(0, 7) + '…' + groqKey.slice(-4) : '',
     openaiKeySet: !!openaiKey,
     openaiKeyMasked: openaiKey ? openaiKey.slice(0, 6) + '…' + openaiKey.slice(-4) : '',
+    anthropicKeySet: !!anthropicKey,
+    anthropicKeyMasked: anthropicKey ? anthropicKey.slice(0, 8) + '…' + anthropicKey.slice(-4) : '',
     llmReady: info.hasKey,
     smtpUser: s.smtpUser || '',
     fromName: s.fromName || '',
@@ -461,7 +469,7 @@ app.get('/api/settings', (req, res) => {
 app.post('/api/settings', (req, res) => {
   const db = load();
   db.settings = db.settings || {};
-  const { groqKey, openaiKey, provider, model, smtpUser, smtpPass, fromName,
+  const { groqKey, openaiKey, anthropicKey, provider, model, smtpUser, smtpPass, fromName,
           autoSearch, autoSearchHours, customPrompt, mode, dailyTarget,
           sources, apifyToken } = req.body;
   if (sources !== undefined && typeof sources === 'object') {
@@ -494,7 +502,8 @@ app.post('/api/settings', (req, res) => {
   if (req.body.remoteOk !== undefined) db.settings.remoteOk = !!req.body.remoteOk;
   if (groqKey !== undefined && groqKey.trim()) db.settings.groqKey = groqKey.trim();
   if (openaiKey !== undefined && openaiKey.trim()) db.settings.openaiKey = openaiKey.trim();
-  if (provider !== undefined) db.settings.provider = provider === 'openai' ? 'openai' : 'groq';
+  if (anthropicKey !== undefined && anthropicKey.trim()) db.settings.anthropicKey = anthropicKey.trim();
+  if (provider !== undefined) db.settings.provider = ['openai', 'anthropic'].includes(provider) ? provider : 'groq';
   if (model !== undefined) db.settings.model = model.trim();
   if (smtpUser !== undefined) db.settings.smtpUser = smtpUser.trim();
   if (smtpPass !== undefined && smtpPass.trim()) db.settings.smtpPass = smtpPass.replace(/\s+/g, '');
@@ -566,6 +575,12 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
+// ---------- Health check (used by smoke tests / uptime probes) ----------
+
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, mockMode: !llm.hasKey() });
+});
+
 // ---------- Reset current profile's data ----------
 
 app.post('/api/demo/reset', (req, res) => {
@@ -578,11 +593,23 @@ app.post('/api/demo/reset', (req, res) => {
   res.json({ ok: true });
 });
 
-app.listen(PORT, () => {
-  console.log(`JobPilot running at http://localhost:${PORT}`);
-  console.log(`Data folder: ${DATA_DIR} ${isFirstRun() ? '(new install — setup will open in the browser)' : '(existing data loaded)'}`);
-  const info = llm.providerInfo();
-  console.log(`LLM: ${info.hasKey ? `${info.provider} (${info.model})` : 'MOCK MODE (no API key)'}`);
-  startScheduler();
-  startAutoSearch();
-});
+function start() {
+  const server = app.listen(PORT, HOST, () => {
+    const shownHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+    console.log(`JobPilot running at http://${shownHost}:${PORT}`);
+    if (LAN) {
+      console.log('⚠️  LAN mode ON — the app is reachable by anyone on your network (they could read your CV, change settings and send email from your Gmail). Unset HOST/JOBPILOT_LAN to bind to localhost only.');
+    }
+    console.log(`Data folder: ${DATA_DIR} ${isFirstRun() ? '(new install — setup will open in the browser)' : '(existing data loaded)'}`);
+    const info = llm.providerInfo();
+    console.log(`LLM: ${info.hasKey ? `${info.provider} (${info.model})` : 'MOCK MODE (no API key)'}`);
+    startScheduler();
+    startAutoSearch();
+  });
+  return server;
+}
+
+// Auto-start only when run directly, so tests can import `app` without binding.
+if (require.main === module) start();
+
+module.exports = { app, start };

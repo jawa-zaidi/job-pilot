@@ -837,7 +837,8 @@ applyNavState();
 
 const MODEL_HINTS = {
   groq: 'Groq defaults: llama-3.3-70b-versatile. Others: llama-3.1-8b-instant (faster).',
-  openai: 'OpenAI defaults: gpt-4o-mini. Others: gpt-4o, gpt-4.1-mini.'
+  openai: 'OpenAI defaults: gpt-4o-mini. Others: gpt-4o, gpt-4.1-mini.',
+  anthropic: 'Anthropic defaults: claude-haiku-4-5-20251001. Others: claude-sonnet-4-5 (higher quality).'
 };
 
 async function openSettings(welcome = false) {
@@ -870,6 +871,8 @@ async function openSettings(welcome = false) {
   $('#setGroqKey').placeholder = s.groqKeySet ? `configured ✓ (${s.groqKeyMasked}) — paste to replace` : 'gsk_…';
   $('#setOpenaiKey').value = '';
   $('#setOpenaiKey').placeholder = s.openaiKeySet ? `configured ✓ (${s.openaiKeyMasked}) — paste to replace` : 'sk-…';
+  $('#setAnthropicKey').value = '';
+  $('#setAnthropicKey').placeholder = s.anthropicKeySet ? `configured ✓ (${s.anthropicKeyMasked}) — paste to replace` : 'sk-ant-…';
   $('#setPromptFind').value = s.promptFind;
   $('#setPromptCV').value = s.promptCV;
   $('#setPromptEmail').value = s.promptEmail;
@@ -902,6 +905,7 @@ $('#settingsSave').addEventListener('click', async () => {
       model: $('#setModel').value,
       groqKey: $('#setGroqKey').value,
       openaiKey: $('#setOpenaiKey').value,
+      anthropicKey: $('#setAnthropicKey').value,
       promptFind: $('#setPromptFind').value,
       promptCV: $('#setPromptCV').value,
       promptEmail: $('#setPromptEmail').value,

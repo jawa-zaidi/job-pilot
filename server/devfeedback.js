@@ -5,7 +5,10 @@
 // email them to the developer: how the app is being used and where quality
 // falls short. STRICTLY numbers and error categories — never names, companies,
 // job titles, email contents or anything personal.
-// Enabled by default; the user can opt out in Settings.
+// OFF by default (opt-in): the user must explicitly enable it in Settings.
+// Note: reports are sent FROM the user's own Gmail, so the developer receives
+// the user's email address — it is aggregate/no-PII in content, but not
+// sender-anonymous. Disclosed in the README and Settings.
 const { load, save, now, logActivity, listProfiles } = require('./db');
 const llm = require('./llm');
 const emailer = require('./email');
@@ -16,7 +19,7 @@ const EVERY_DAYS = 6;
 function config() {
   const s = load().settings || {};
   return {
-    enabled: s.devFeedbackEnabled !== false, // on by default, opt-out
+    enabled: s.devFeedbackEnabled === true, // OFF by default, opt-in only
     email: (s.devFeedbackEmail || DEV_EMAIL).trim(),
     lastAt: s.devFeedbackLastAt || 0
   };

@@ -226,6 +226,7 @@
       <select id="setProvider">
         <option value="groq">Groq (fast &amp; free tier)</option>
         <option value="openai">OpenAI (ChatGPT)</option>
+        <option value="anthropic">Anthropic (Claude)</option>
       </select>
     </label>
     <label class="field">
@@ -242,6 +243,11 @@
       <span>OpenAI API key</span>
       <input type="password" id="setOpenaiKey" placeholder="sk-…" autocomplete="off">
       <small>From <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--accent)">platform.openai.com/api-keys</a> (paid account needed).</small>
+    </label>
+    <label class="field">
+      <span>Anthropic (Claude) API key</span>
+      <input type="password" id="setAnthropicKey" placeholder="sk-ant-…" autocomplete="off">
+      <small>From <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">console.anthropic.com</a> (paid account needed). Best quality/$ with Claude Haiku.</small>
     </label>
 
     <h3>Custom AI instructions — one per step</h3>
@@ -302,10 +308,10 @@
       <small>Also sent after every automated run. Reports are always viewable in the app (📊 button).</small>
     </label>
     <label class="field" style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="setDevFeedback" style="width:auto" checked>
-      <span style="margin:0">Share anonymous usage feedback with the JobPilot developer (every ~6 days)</span>
+      <input type="checkbox" id="setDevFeedback" style="width:auto">
+      <span style="margin:0">Share usage feedback with the JobPilot developer (off by default; every ~6 days)</span>
     </label>
-    <small style="color:var(--muted);display:block;margin:-6px 0 8px">Aggregate numbers only — how many jobs found/applied, which sources, error categories, costs. Never names, companies, job titles or email contents. Helps improve JobPilot; untick to opt out.</small>
+    <small style="color:var(--muted);display:block;margin:-6px 0 8px">Off unless you tick this. Aggregate numbers only — how many jobs found/applied, which sources, error categories, costs. Never names, companies, job titles or email contents. Note: it's sent from your own Gmail, so the developer sees the address it comes from (the report body carries no personal data).</small>
 
     <h3>Email — Gmail (sends from your name)</h3>
     <label class="field">
