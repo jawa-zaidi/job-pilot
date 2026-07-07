@@ -1,9 +1,59 @@
 // Job sources, user-selectable in Settings → Job sources.
-// - Remotive: free public API, on by default, no key needed.
-// - LinkedIn via Apify: activates when the user pastes an Apify token (beta).
-// - Naukri: coming soon (Apify scraper or Playwright).
+// - Free boards (Remotive/RemoteOK/Arbeitnow): on by default, no key needed.
+// - Career pages (ATS public APIs): activates when company boards are listed.
+// - Adzuna: activates when the user adds free API credentials.
+// - LinkedIn & Naukri via Apify: activate with an Apify token (beta).
 const crypto = require('crypto');
 const { load, logActivity } = require('./db');
+const ats = require('./sources/ats');
+const adzuna = require('./sources/adzuna');
+const naukri = require('./sources/naukri');
+
+// ---------- Canonical job identity ----------
+// The same opening shows up on several boards with different IDs — dedup and
+// "already applied" checks key on normalized company+title, not source IDs.
+
+const COMPANY_SUFFIXES = /\b(inc|ltd|llc|llp|pvt|private|limited|corp|corporation|co|gmbh|technologies|technology|labs|solutions)\b\.?/g;
+
+function normCompany(s) {
+  return String(s || '').toLowerCase()
+    .replace(/\(.*?\)/g, ' ')
+    .replace(COMPANY_SUFFIXES, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function normTitle(s) {
+  return String(s || '').toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, ' ')   // "(Remote)", "[Urgent]"
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function canonicalKey(job) {
+  return `${normCompany(job.company)}|${normTitle(job.title)}`;
+}
+
+// ---------- Recruiter email extraction ----------
+// Postings (and LinkedIn hiring posts) often carry a real contact address —
+// the highest-quality apply path there is. Never pick no-reply machinery.
+
+const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+const JUNK_EMAIL = /no-?reply|do-?not-?reply|donotreply|notifications?@|mailer-daemon|@example\.|@email\.|unsubscribe|privacy@|dpo@|legal@|compliance@|gdpr|abuse@|postmaster|webmaster|security@|support@|@sentry|@googlegroups/i;
+
+function extractRecruiterEmail(text) {
+  const found = String(text || '').match(EMAIL_RE) || [];
+  for (const raw of found) {
+    const e = raw.replace(/^[.]+|[.]+$/g, '').toLowerCase();
+    if (!JUNK_EMAIL.test(e) && e.length <= 60) return e;
+  }
+  return '';
+}
+
+// Is this address a no-reply machine rather than a person we could write to?
+function isJunkContact(email) {
+  return !email || JUNK_EMAIL.test(String(email).toLowerCase());
+}
 
 function stripHtml(html) {
   return String(html || '')
@@ -37,6 +87,8 @@ function sourcesConfig() {
     remotive: s.sources?.remotive !== false, // on by default
     linkedin: !!s.sources?.linkedin,
     naukri: !!s.sources?.naukri,
+    ats: ats.companySlugs().length > 0,      // on when company boards are listed
+    adzuna: adzuna.isConfigured(),           // on when API credentials are set
     apifyToken: s.apifyToken || ''
   };
 }
@@ -218,17 +270,24 @@ async function searchLinkedInApify(query, limit, token) {
   const items = JSON.parse(bodyText);
   // harvestapi schema: title, company{name}, linkedinUrl, location{linkedinText},
   // salary{text}, postedDate, descriptionText, hiringTeam[]
-  return (Array.isArray(items) ? items : []).slice(0, limit).map(j => ({
-    id: `linkedin-${crypto.createHash('md5').update(String(j.linkedinUrl || j.id || String(j.title))).digest('hex').slice(0, 10)}`,
-    source: 'LinkedIn',
-    title: j.title || 'Untitled role',
-    company: j.company?.name || 'Unknown',
-    location: j.location?.linkedinText || '',
-    url: j.linkedinUrl || '',
-    salary: j.salary?.text || '',
-    publishedAt: j.postedDate || '',
-    description: stripHtml(j.descriptionText || '').slice(0, 5000)
-  }));
+  return (Array.isArray(items) ? items : []).slice(0, limit).map(j => {
+    const recruiter = Array.isArray(j.hiringTeam) ? j.hiringTeam[0] : null; // often a real person
+    return {
+      id: `linkedin-${crypto.createHash('md5').update(String(j.linkedinUrl || j.id || String(j.title))).digest('hex').slice(0, 10)}`,
+      source: 'LinkedIn',
+      title: j.title || 'Untitled role',
+      company: j.company?.name || 'Unknown',
+      location: j.location?.linkedinText || '',
+      url: j.linkedinUrl || '',
+      salary: j.salary?.text || '',
+      publishedAt: j.postedDate || '',
+      description: stripHtml(j.descriptionText || '').slice(0, 5000),
+      ...(recruiter ? {
+        recruiterName: recruiter.name || recruiter.title || '',
+        recruiterUrl: recruiter.url || recruiter.linkedinUrl || ''
+      } : {})
+    };
+  });
 }
 
 function sampleJobs() {
@@ -241,12 +300,52 @@ function sampleJobs() {
   }));
 }
 
+// The ATS boards return every open role per company — fetch once per batch of
+// queries, not once per query.
+let atsCache = { at: 0, jobs: [] };
+async function atsJobsCached() {
+  if (Date.now() - atsCache.at < 10 * 60 * 1000) return atsCache.jobs;
+  const { jobs, errors } = await ats.searchAts();
+  for (const e of errors) console.error('ATS board error:', e);
+  atsCache = { at: Date.now(), jobs };
+  return jobs;
+}
+
 async function searchJobs(query, limit = 10) {
   const cfg = sourcesConfig();
   const prefs = jobPrefs();
   const jobs = [];
   const used = [];
   let filtered = 0; // dropped for location/recency
+
+  // Career pages first — the highest-quality source we have
+  if (cfg.ats) {
+    try {
+      const all = await atsJobsCached();
+      const refined = refine(keywordFilter(all, query, limit * 2), prefs);
+      filtered += Math.max(0, all.length - refined.length);
+      jobs.push(...refined.slice(0, limit));
+      if (refined.length) used.push('Career pages');
+    } catch (err) {
+      console.error('ATS fetch failed:', err.message);
+    }
+  }
+
+  if (cfg.adzuna) {
+    try {
+      const az = await adzuna.searchAdzuna(query, {
+        limit: limit * 2,
+        maxAgeDays: prefs.maxAgeDays,
+        location: prefs.locations[0] || ''
+      });
+      const refined = refine(az, prefs);
+      filtered += az.length - refined.length;
+      jobs.push(...refined.slice(0, limit));
+      if (refined.length) used.push('Adzuna');
+    } catch (err) {
+      console.error('Adzuna fetch failed:', err.message);
+    }
+  }
 
   if (cfg.remotive) {
     // Free boards. Remotive/RemoteOK are remote/English; Arbeitnow is EU/Germany-
@@ -289,7 +388,23 @@ async function searchJobs(query, limit = 10) {
       }
     }
   }
-  // Naukri: not implemented yet (no official API; Apify scraper or Playwright next)
+  if (cfg.naukri && cfg.apifyToken) {
+    try {
+      const nk = await naukri.searchNaukri(query, { limit, location: prefs.locations[0] || '' });
+      try { require('./costs').recordSource('Naukri', nk.length); } catch { /* best-effort */ }
+      const refined = nk.filter(j => isRecent(j, prefs.maxAgeDays));
+      filtered += nk.length - refined.length;
+      jobs.push(...refined);
+      if (refined.length) used.push('Naukri');
+    } catch (err) {
+      console.error('Naukri (Apify) fetch failed:', err.message);
+      if (err.message.includes('approval') || err.message.includes('rented') || err.message.includes('token')) {
+        const db = load();
+        const recent = (db.activity || []).slice(0, 20).some(a => a.text.includes('Naukri scraper') || a.text.includes('Naukri needs'));
+        if (!recent) logActivity(`⚠️ ${err.message}`, 'error');
+      }
+    }
+  }
 
   if (!jobs.length) {
     // Don't fall back to sample jobs when the user has real filters — an empty
@@ -297,10 +412,12 @@ async function searchJobs(query, limit = 10) {
     if (prefs.locations.length || used.length) return { jobs: [], source: used.join(' + ') || 'no sources', filtered };
     return { jobs: sampleJobs(), source: 'Sample (offline fallback)', filtered };
   }
-  // dedupe by title+company across sources, newest first
+  // dedupe across sources on canonical company+title (career page beats
+  // aggregator copy of the same role because ATS jobs are pushed first),
+  // then newest first
   const seen = new Set();
   const unique = jobs.filter(j => {
-    const k = `${j.title}|${j.company}`.toLowerCase();
+    const k = canonicalKey(j);
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -308,4 +425,4 @@ async function searchJobs(query, limit = 10) {
   return { jobs: unique, source: used.join(' + '), filtered };
 }
 
-module.exports = { searchJobs, sourcesConfig, jobPrefs };
+module.exports = { searchJobs, sourcesConfig, jobPrefs, canonicalKey, normCompany, extractRecruiterEmail, isJunkContact };

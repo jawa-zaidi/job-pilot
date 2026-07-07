@@ -124,17 +124,20 @@ app.post('/api/batch/send', async (req, res) => {
   }
 });
 
-// Feedback at any step: appended to the custom system prompt so the AI
-// learns the user's preferences from then on.
+// Feedback: appended to the chosen step's system prompt (find | cv | email)
+// so the AI learns the user's preferences for that step from then on.
 app.post('/api/feedback', (req, res) => {
   const text = String(req.body.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Empty feedback' });
+  const kind = ['find', 'cv', 'email'].includes(req.body.kind) ? req.body.kind : 'email';
+  const field = { find: 'promptFind', cv: 'promptCV', email: 'promptEmail' }[kind];
   const db = load();
   db.settings = db.settings || {};
-  db.settings.customPrompt = ((db.settings.customPrompt || '').trim() + '\n- ' + text).trim();
+  db.settings[field] = ((db.settings[field] || '').trim() + '\n- ' + text).trim();
   save();
-  logActivity(`AI instruction added: "${text.slice(0, 80)}${text.length > 80 ? '…' : ''}"`, 'settings');
-  res.json({ customPrompt: db.settings.customPrompt });
+  const label = { find: 'job finding', cv: 'CV writing', email: 'email writing' }[kind];
+  logActivity(`AI instruction for ${label} added: "${text.slice(0, 70)}${text.length > 70 ? '…' : ''}"`, 'settings');
+  res.json({ ok: true, kind });
 });
 
 // ---------- Sync: send all due follow-ups + read inbox + update board ----------
@@ -228,16 +231,85 @@ app.patch('/api/applications/:id', (req, res) => {
   const db = load();
   const a = db.applications.find(x => x.id === req.params.id);
   if (!a) return res.status(404).json({ error: 'Not found' });
-  const { status, notes, recipientEmail } = req.body;
-  if (status) {
+  const { status, notes, recipientEmail, manualApplied } = req.body;
+  if (manualApplied) {
+    // "I applied on the platform" confirmation from the Your-action column
+    a.status = 'applied';
+    if (!a.appliedAt) a.appliedAt = now();
+    a.applicationSent = { at: now(), manual: true, to: null };
+    logActivity(`✋→✓ You applied on the platform: ${a.title} at ${a.company} — now tracking it`, 'apply');
+    insights.afterApplies(1).catch(err => console.error('insights hook failed:', err.message));
+  } else if (status) {
     a.status = status;
     if (status === 'applied' && !a.appliedAt) a.appliedAt = now();
     logActivity(`${a.title} at ${a.company} moved to "${status}"`, 'move');
   }
   if (notes !== undefined) a.notes = notes;
-  if (recipientEmail !== undefined) a.recipientEmail = recipientEmail.trim();
+  if (recipientEmail !== undefined) {
+    a.recipientEmail = recipientEmail.trim();
+    a.applyPath = a.recipientEmail ? 'email' : 'manual';
+    // adding an address to a "Your action" card puts it back on the email path
+    if (a.recipientEmail && a.status === 'action' && a.tailored) a.status = 'ready';
+    if (!a.recipientEmail && a.status === 'ready') a.status = 'action';
+  }
   save();
   res.json({ application: a });
+});
+
+// Bulk-confirm manual applies: every "Your action" card the user says they
+// applied to moves to Applied and starts being tracked.
+app.post('/api/applications/mark-all-applied', (req, res) => {
+  const db = load();
+  let n = 0;
+  for (const a of db.applications) {
+    if (a.status !== 'action') continue;
+    a.status = 'applied';
+    if (!a.appliedAt) a.appliedAt = now();
+    a.applicationSent = { at: now(), manual: true, to: null };
+    n++;
+  }
+  save();
+  if (n) {
+    logActivity(`✋→✓ ${n} platform application${n > 1 ? 's' : ''} confirmed as applied — now tracked with follow-up reminders`, 'apply');
+    insights.afterApplies(n).catch(err => console.error('insights hook failed:', err.message));
+  }
+  res.json({ applied: n });
+});
+
+// Record a manual follow-up as done (day 3/5/10 reminder on platform applies)
+app.post('/api/applications/:id/followup-done', (req, res) => {
+  const db = load();
+  const a = db.applications.find(x => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: 'Not found' });
+  const day = Number(req.body?.day);
+  if (!FOLLOW_UP_DAYS.includes(day)) return res.status(400).json({ error: 'Invalid follow-up day' });
+  a.followups = a.followups || [];
+  if (!a.followups.some(f => f.day === day)) {
+    a.followups.push({ day, sentAt: now(), manual: true });
+    if (a.status === 'applied') a.status = 'followup';
+    logActivity(`✓ Day-${day} follow-up marked done (on platform) for ${a.title} at ${a.company}`, 'followup');
+  }
+  save();
+  res.json({ application: a });
+});
+
+// Tailored CV as a downloadable PDF — for manual applies where the platform
+// asks for a CV upload. Same rendering as the email attachment.
+app.get('/api/applications/:id/cv.pdf', async (req, res) => {
+  try {
+    const db = load();
+    const a = db.applications.find(x => x.id === req.params.id);
+    if (!a) return res.status(404).json({ error: 'Not found' });
+    if (!a.tailored?.cv) return res.status(400).json({ error: 'Generate the tailored CV first' });
+    const { cvToPdfBuffer, cvFileName } = require('./pdf');
+    const buf = await cvToPdfBuffer(a.tailored.cv, { name: db.profile?.name });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${cvFileName(db.profile?.name, a.company, a.title)}"`);
+    res.send(buf);
+  } catch (err) {
+    console.error('CV PDF failed:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.delete('/api/applications/:id', (req, res) => {
@@ -256,8 +328,17 @@ app.post('/api/applications/:id/tailor', async (req, res) => {
 
     const feedback = String(req.body?.feedback || '').trim();
     a.tailored = await llm.tailorApplication(db.profile, db.cvText || '', a, feedback);
+    // same honesty gate as the batch: no invented claims go out
+    if (db.settings?.factCheck !== false && llm.hasKey()) {
+      const check = await llm.reviewTailored(db.profile, db.cvText || '', a, a.tailored, feedback);
+      a.qualityCheck = { ok: check.ok, problems: check.problems, checked: check.checked, at: now() };
+      if (!check.ok) {
+        if (check.cv) a.tailored.cv = check.cv;
+        if (check.email_body) a.tailored.email_body = check.email_body;
+      }
+    }
     a.tailoredAt = now();
-    if (['discovered', 'approved'].includes(a.status)) a.status = 'ready';
+    if (['discovered', 'approved'].includes(a.status)) a.status = a.recipientEmail ? 'ready' : 'action';
     save();
     logActivity(feedback
       ? `Revised CV/email for ${a.title} at ${a.company} per your feedback: "${feedback.slice(0, 60)}${feedback.length > 60 ? '…' : ''}"`
@@ -276,15 +357,38 @@ app.post('/api/applications/:id/apply', async (req, res) => {
     if (!a) return res.status(404).json({ error: 'Not found' });
     if (!a.tailored) return res.status(400).json({ error: 'Generate the tailored CV & email first' });
 
+    // don't email about a posting that died since discovery
+    const alive = await require('./verify').verifyJobLive(a);
+    if (!alive.live) {
+      a.status = 'closed';
+      a.notes = ((a.notes || '') + `\nExpired before applying: ${alive.reason}`).trim();
+      save();
+      logActivity(`Skipped ${a.title} at ${a.company} — ${alive.reason}`, 'move');
+      return res.status(409).json({ error: `This posting is no longer live (${alive.reason}) — moved to Closed.` });
+    }
+
+    const { cvToPdfBuffer, cvFileName } = require('./pdf');
+    const attachments = [];
+    try {
+      attachments.push({
+        filename: cvFileName(db.profile?.name, a.company),
+        content: await cvToPdfBuffer(a.tailored.cv, { name: db.profile?.name })
+      });
+    } catch (err) { console.error('CV PDF failed, sending text fallback:', err.message); }
     const result = await email.sendEmail({
       to: a.recipientEmail,
       subject: a.tailored.email_subject,
-      body: a.tailored.email_body + '\n\n---\n' + a.tailored.cv
+      body: a.tailored.email_body + (attachments.length ? '' : '\n\n---\n' + a.tailored.cv),
+      attachments
     });
     a.status = 'applied';
     a.appliedAt = now();
-    a.applicationSent = { at: now(), ...result };
+    a.applicationSent = { at: now(), ...result, cvAttached: !!attachments.length };
     save();
+    // a drawer-send counts toward the open run (and lets it settle when done)
+    if (load().currentRun) {
+      try { require('./runs').addToRun(result.simulated ? { simulated: 1 } : { sent: 1 }); } catch { /* best-effort */ }
+    }
     logActivity(
       `Application ${result.simulated ? 'sent (simulated)' : `emailed to ${result.to}`} for ${a.title} at ${a.company} — follow-ups scheduled for day ${FOLLOW_UP_DAYS.join(', ')}`,
       'apply'
@@ -317,6 +421,9 @@ app.get('/api/settings', (req, res) => {
     fromName: s.fromName || '',
     smtpConfigured: email.isConfigured(),
     customPrompt: s.customPrompt || '',
+    promptFind: s.promptFind || '',
+    promptCV: s.promptCV || '',
+    promptEmail: s.promptEmail || '',
     mode: s.mode || 'manual',
     dailyTarget: batch.dailyTarget(),
     autoSearch: autoSearchConfig().enabled,
@@ -327,13 +434,23 @@ app.get('/api/settings', (req, res) => {
     insightsEnabled: insights.insightsConfig().enabled,
     insightsEvery: insights.insightsConfig().every,
     insightsEmail: insights.insightsConfig().email,
+    devFeedbackEnabled: require('./devfeedback').config().enabled,
     sources: {
       remotive: sourcesConfig().remotive,
       linkedin: sourcesConfig().linkedin,
-      naukri: sourcesConfig().naukri
+      naukri: sourcesConfig().naukri,
+      ats: sourcesConfig().ats,
+      adzuna: sourcesConfig().adzuna
     },
     apifyTokenSet: !!(s.apifyToken),
     apifyTokenMasked: s.apifyToken ? s.apifyToken.slice(0, 10) + '…' : '',
+    atsCompanies: s.atsCompanies || '',
+    adzunaAppId: s.adzunaAppId || '',
+    adzunaKeySet: !!s.adzunaAppKey,
+    adzunaCountry: s.adzunaCountry || 'in',
+    autoMinScore: batch.autoMinScore(),
+    factCheck: s.factCheck !== false,
+    companyCooldownDays: s.companyCooldownDays ?? 14,
     jobLocations: Array.isArray(s.jobLocations) ? s.jobLocations : (s.jobLocation ? [s.jobLocation] : []),
     maxJobAgeDays: s.maxJobAgeDays || 30,
     preferLowCompetition: !!s.preferLowCompetition,
@@ -355,6 +472,16 @@ app.post('/api/settings', (req, res) => {
     };
   }
   if (apifyToken !== undefined && apifyToken.trim()) db.settings.apifyToken = apifyToken.trim();
+  if (req.body.atsCompanies !== undefined) {
+    db.settings.atsCompanies = String(req.body.atsCompanies).trim();
+    db.settings.atsDetected = {}; // re-probe boards when the list changes
+  }
+  if (req.body.adzunaAppId !== undefined) db.settings.adzunaAppId = String(req.body.adzunaAppId).trim();
+  if (req.body.adzunaAppKey !== undefined && String(req.body.adzunaAppKey).trim()) db.settings.adzunaAppKey = String(req.body.adzunaAppKey).trim();
+  if (req.body.adzunaCountry !== undefined) db.settings.adzunaCountry = String(req.body.adzunaCountry).trim().toLowerCase() || 'in';
+  if (req.body.autoMinScore !== undefined) db.settings.autoMinScore = Math.min(95, Math.max(0, Number(req.body.autoMinScore) || 70));
+  if (req.body.factCheck !== undefined) db.settings.factCheck = !!req.body.factCheck;
+  if (req.body.companyCooldownDays !== undefined) db.settings.companyCooldownDays = Math.max(0, Number(req.body.companyCooldownDays) || 0);
   if (req.body.jobLocations !== undefined) {
     const list = Array.isArray(req.body.jobLocations)
       ? req.body.jobLocations
@@ -375,9 +502,13 @@ app.post('/api/settings', (req, res) => {
   if (autoSearch !== undefined) db.settings.autoSearch = !!autoSearch;
   if (autoSearchHours !== undefined) db.settings.autoSearchHours = Math.max(1, Number(autoSearchHours) || 6);
   if (customPrompt !== undefined) db.settings.customPrompt = String(customPrompt);
+  if (req.body.promptFind !== undefined) db.settings.promptFind = String(req.body.promptFind);
+  if (req.body.promptCV !== undefined) db.settings.promptCV = String(req.body.promptCV);
+  if (req.body.promptEmail !== undefined) db.settings.promptEmail = String(req.body.promptEmail);
   if (mode !== undefined) db.settings.mode = mode === 'auto' ? 'auto' : 'manual';
   if (dailyTarget !== undefined) db.settings.dailyTarget = Math.max(1, Number(dailyTarget) || 50);
   if (req.body.insightsEnabled !== undefined) db.settings.insightsEnabled = !!req.body.insightsEnabled;
+  if (req.body.devFeedbackEnabled !== undefined) db.settings.devFeedbackEnabled = !!req.body.devFeedbackEnabled;
   if (req.body.insightsEvery !== undefined) db.settings.insightsEvery = Math.max(5, Number(req.body.insightsEvery) || 50);
   if (req.body.insightsEmail !== undefined) db.settings.insightsEmail = String(req.body.insightsEmail).trim();
   save();
@@ -398,6 +529,12 @@ app.post('/api/settings/test-email', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ---------- Runs (per-run cost & outcome ledger) ----------
+
+app.get('/api/runs', (req, res) => {
+  res.json(require('./runs').listRuns(20));
 });
 
 // ---------- Stats ----------
@@ -435,6 +572,7 @@ app.post('/api/demo/reset', (req, res) => {
   const db = load();
   db.profile = null; db.cvText = null; db.applications = [];
   db.activity = []; db.reports = []; db.appliedSinceReport = 0;
+  db.runs = []; db.currentRun = null;
   db.lastAutoSearchAt = null;
   save();
   res.json({ ok: true });

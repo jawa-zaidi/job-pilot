@@ -48,6 +48,14 @@ function snapshot() {
     avgMatchScoreApplied: applied.length ? Math.round(applied.reduce((n, a) => n + (a.matchScore || 0), 0) / applied.length) : 0,
     withRecruiterEmail: applied.filter(a => a.recipientEmail).length,
     simulatedSends: applied.filter(a => a.applicationSent?.simulated).length,
+    manualPlatformApplies: applied.filter(a => a.applicationSent?.manual).length,
+    awaitingUserAction: apps.filter(a => a.status === 'action').length,
+    expiredBeforeApply: apps.filter(a => (a.notes || '').includes('Expired before applying')).length,
+    confirmedReceived: applied.filter(a => a.confirmed).length,
+    recentRuns: (db.runs || []).slice(0, 5).map(r => ({
+      mode: r.mode, found: r.found, tailored: r.tailored, sent: r.sent,
+      manualQueued: r.manualQueued, costUSD: Number((r.costTotal || 0).toFixed(4))
+    })),
     totalApiCostUSD: Number((require('./costs').totals().totalUSD || 0).toFixed(4)),
     replyRateByMatchBand: byBand,
     replyRateBySource: bySource,

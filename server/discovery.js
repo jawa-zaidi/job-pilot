@@ -3,10 +3,29 @@
 // roles extracted from the user's CV.
 const { load, save, now, logActivity } = require('./db');
 const llm = require('./llm');
-const { searchJobs } = require('./jobs');
+const { searchJobs, canonicalKey, normCompany, extractRecruiterEmail } = require('./jobs');
 
-const MIN_SCORE = 30;      // discard poor fits
+const MIN_SCORE = 40;      // discard poor fits (LLM match floor)
 const CHECK_EVERY_MS = 15 * 60 * 1000;
+
+function cooldownDays() {
+  return Math.max(0, Number(load().settings?.companyCooldownDays) || 14);
+}
+
+// Rank = LLM fit + bonuses discovery can see on its own. The match % shown to
+// the user stays the pure LLM fit; boosts only change ordering and are listed
+// with the match reasons so the ranking is explainable.
+function rankBoosts(job) {
+  const boosts = [];
+  let bonus = 0;
+  const age = job.publishedAt ? (Date.now() - new Date(job.publishedAt).getTime()) / 86400000 : null;
+  if (age != null && age <= 2) { bonus += 8; boosts.push('posted <48h — few applicants yet (+8)'); }
+  else if (age != null && age <= 7) { bonus += 4; boosts.push('posted this week (+4)'); }
+  else if (age != null && age > 21) { bonus -= 5; boosts.push('3+ weeks old (−5)'); }
+  if (job.recipientEmail) { bonus += 10; boosts.push('recruiter email found — direct apply path (+10)'); }
+  if (job.source === 'Career page') { bonus += 5; boosts.push('direct from company career page (+5)'); }
+  return { bonus, boosts };
+}
 
 async function discover(query, { activityLabel = 'Job search', limit = 10, maxAdd = Infinity } = {}) {
   const db = load();
@@ -14,21 +33,51 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
   const q = (query || db.profile.target_roles?.[0] || db.profile.title || 'software').trim();
 
   const { jobs, source } = await searchJobs(q, limit);
-  const fresh = jobs.filter(j => !db.applications.some(a => a.id === j.id));
+
+  // Skip anything already on the board — same source ID or the same
+  // company+title from another source (reposts and cross-board duplicates).
+  const knownKeys = new Set(db.applications.map(a => a.key || canonicalKey(a)));
+  const knownIds = new Set(db.applications.map(a => a.id));
+  // Company cooldown: recently applied there → don't pile on a second one yet
+  const cd = cooldownDays() * 86400000;
+  const recentCompanies = new Set(
+    db.applications
+      .filter(a => a.appliedAt && now() - a.appliedAt < cd)
+      .map(a => normCompany(a.company))
+  );
+
+  let dupes = 0, cooled = 0;
+  const fresh = jobs.filter(j => {
+    if (knownIds.has(j.id) || knownKeys.has(canonicalKey(j))) { dupes++; return false; }
+    if (recentCompanies.has(normCompany(j.company))) { cooled++; return false; }
+    return true;
+  });
+
+  // Best apply path: a real contact address in the posting
+  for (const j of fresh) {
+    if (!j.recipientEmail) j.recipientEmail = extractRecruiterEmail(j.description);
+  }
+
   const scores = fresh.length ? await llm.scoreJobs(db.profile, fresh) : {};
 
-  // best matches first, so a maxAdd cap keeps the strongest ones
-  fresh.sort((a, b) => (scores[String(b.id)]?.score || 0) - (scores[String(a.id)]?.score || 0));
+  // strongest first (fit + bonuses), so a maxAdd cap keeps the best ones
+  const ranked = fresh.map(job => {
+    const s = scores[String(job.id)] || { score: 50, reasons: [] };
+    const { bonus, boosts } = rankBoosts(job);
+    return { job, score: s.score, reasons: s.reasons || [], bonus, boosts };
+  }).sort((a, b) => (b.score + b.bonus) - (a.score + a.bonus));
 
   let added = 0, skipped = 0;
-  for (const job of fresh) {
+  for (const r of ranked) {
     if (added >= maxAdd) break;
-    const s = scores[String(job.id)] || { score: 50, reasons: [] };
-    if (s.score < MIN_SCORE) { skipped++; continue; }
+    if (r.score < MIN_SCORE) { skipped++; continue; }
     db.applications.push({
-      ...job,
-      matchScore: Math.round(s.score),
-      matchReasons: s.reasons,
+      ...r.job,
+      key: canonicalKey(r.job),
+      applyPath: r.job.recipientEmail ? 'email' : 'manual',
+      matchScore: Math.round(r.score),
+      matchReasons: [...r.reasons, ...r.boosts],
+      rankScore: Math.round(r.score + r.bonus),
       status: 'discovered',
       createdAt: now(),
       appliedAt: null,
@@ -36,14 +85,20 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
       followups: [],
       notes: ''
     });
+    knownKeys.add(canonicalKey(r.job)); // no dupes within this batch either
     added++;
   }
-  db.applications.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+  db.applications.sort((a, b) => (b.rankScore || b.matchScore || 0) - (a.rankScore || a.matchScore || 0));
   save();
-  if (added || skipped) {
-    logActivity(`${activityLabel} "${q}" via ${source}: ${added} good matches added${skipped ? `, ${skipped} poor fits filtered out` : ''}`, 'search');
+  if (added || skipped || dupes || cooled) {
+    const extras = [
+      skipped ? `${skipped} poor fits filtered` : '',
+      dupes ? `${dupes} duplicates/reposts skipped` : '',
+      cooled ? `${cooled} skipped (applied to that company recently)` : ''
+    ].filter(Boolean).join(', ');
+    logActivity(`${activityLabel} "${q}" via ${source}: ${added} good matches added${extras ? ` (${extras})` : ''}`, 'search');
   }
-  return { added, skipped, source, query: q };
+  return { added, skipped, dupes, cooled, source, query: q };
 }
 
 function autoSearchConfig() {

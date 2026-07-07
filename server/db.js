@@ -26,7 +26,9 @@ const WORKSPACE_DEFAULTS = {
   applications: [],       // job cards on the kanban
   activity: [],           // event feed
   reports: [],            // improvement reports
-  appliedSinceReport: 0   // counter for the every-N-applications report
+  appliedSinceReport: 0,  // counter for the every-N-applications report
+  runs: [],               // per-run ledger: what happened + real AI/API cost
+  currentRun: null        // the run in progress (fetch → generate → send)
 };
 
 let raw = null;     // { activeProfileId, profiles: {id: workspace}, settings, lastAutoSearchAt }
@@ -135,6 +137,8 @@ function load() {
     activity: ws.activity,
     reports: ws.reports,
     appliedSinceReport: ws.appliedSinceReport,
+    runs: ws.runs,
+    currentRun: ws.currentRun,
     settings: r.settings,
     lastAutoSearchAt: r.lastAutoSearchAt
   };
@@ -152,7 +156,9 @@ function save() {
     applications: c.applications,
     activity: c.activity,
     reports: c.reports,
-    appliedSinceReport: c.appliedSinceReport
+    appliedSinceReport: c.appliedSinceReport,
+    runs: c.runs,
+    currentRun: c.currentRun
   };
   r.settings = c.settings;
   r.lastAutoSearchAt = c.lastAutoSearchAt;

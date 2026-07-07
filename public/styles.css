@@ -122,6 +122,8 @@ body.nav-collapsed .sidebar { width: 0; padding: 20px 0; border-right: none; ove
 .feedback-row { display: flex; gap: 8px; margin-top: 12px; }
 .feedback-row input { flex: 1; background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; outline: none; font-size: 12.5px; }
 .feedback-row input:focus { border-color: var(--accent); }
+.feedback-row select { background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; outline: none; font-size: 12.5px; flex-shrink: 0; }
+.feedback-row select:focus { border-color: var(--accent); }
 
 /* ---------- Filters ---------- */
 .filter-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12.5px; color: var(--muted); }
@@ -176,6 +178,24 @@ body.nav-collapsed .sidebar { width: 0; padding: 20px 0; border-right: none; ove
 .score.lo { background: rgba(224,86,91,.15); color: var(--red); }
 .tag { font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
 .tag.done { color: var(--green); border-color: rgba(63,185,111,.4); }
+.tag.warn { color: #e0653c; border-color: rgba(224,101,60,.45); }
+
+/* Bulk action in a column header ("✓ all applied" on Your action) */
+.col-action { margin-left: 6px; font-size: 10.5px; color: var(--green); background: rgba(63,185,111,.12); border: 1px solid rgba(63,185,111,.4); border-radius: 6px; padding: 2px 7px; cursor: pointer; }
+.col-action:hover { background: rgba(63,185,111,.25); }
+
+/* Live run status banner above the board */
+.run-status { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; padding: 9px 14px; border-radius: 10px; font-size: 13px; }
+.run-status.hidden { display: none; }
+.run-status.running { background: rgba(79,140,255,.12); border: 1px solid rgba(79,140,255,.4); color: var(--text); }
+.run-status.open { background: rgba(224,165,60,.1); border: 1px solid rgba(224,165,60,.35); color: var(--muted); }
+.run-status .rs-sub { color: var(--muted); font-size: 12px; }
+.run-status .rs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber); flex-shrink: 0; }
+
+/* "Your action" box in the drawer — the user applies on the platform themselves */
+.action-box { background: rgba(224,101,60,.1); border: 1px solid rgba(224,101,60,.4); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; font-size: 13px; }
+.action-box .fix-row { flex-wrap: wrap; }
+.action-box a.btn { text-decoration: none; }
 .followup-pips { display: flex; gap: 3px; margin-left: auto; }
 .pip { width: 8px; height: 8px; border-radius: 50%; background: #3a4453; }
 .pip.sent { background: var(--amber); box-shadow: 0 0 5px var(--amber); }

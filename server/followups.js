@@ -20,6 +20,27 @@ async function processFollowUps() {
     if (!app.appliedAt) continue;
     // stop following up once there's a reply, a decision, or the thread is closed
     if (['interview', 'offer', 'rejected', 'replied', 'closed'].includes(app.status) || app.replied) continue;
+
+    // Manual platform applications have nobody to email — remind the user to
+    // follow up on the platform instead (same day 3/5/10 cadence). If they
+    // later paste a recruiter email on the card, the automatic email
+    // follow-ups below take over for the remaining days.
+    if (!app.recipientEmail) {
+      app.followups = app.followups || [];
+      app.reminded = app.reminded || [];
+      for (const day of FOLLOW_UP_DAYS) {
+        if (current < app.appliedAt + day * DAY_MS) continue;
+        if (app.followups.some(f => f.day === day) || app.reminded.includes(day)) continue;
+        app.reminded.push(day);
+        if (app.status === 'applied') app.status = 'followup';
+        logActivity(
+          `⏰ Follow-up due (day ${day}): ${app.title} at ${app.company} — you applied on the platform, follow up there and mark it done on the card (or add a recruiter email to automate)`,
+          'followup'
+        );
+        changed = true;
+      }
+      continue;
+    }
     app.followups = app.followups || [];
 
     // all follow-ups exhausted + 3 more days of silence → close as "no response"

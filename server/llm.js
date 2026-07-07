@@ -4,6 +4,7 @@
 // mock output when no API key is configured.
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const { load } = require('./db');
+const P = require('./prompts'); // all quality-critical system prompts live in prompts.js
 
 const PROVIDERS = {
   groq: {
@@ -30,20 +31,37 @@ function cfg() {
 
 function hasKey() { return !!cfg().key; }
 function providerInfo() { const c = cfg(); return { provider: c.provider, model: c.model, hasKey: !!c.key }; }
-function customPrompt() { return (load().settings?.customPrompt || '').trim(); }
+// Per-step instructions: 'find' (job scoring), 'cv', 'email'. Falls back to the
+// legacy single customPrompt when a step-specific one isn't set.
+function promptFor(kinds = []) {
+  const s = load().settings || {};
+  const map = { find: s.promptFind, cv: s.promptCV, email: s.promptEmail };
+  const labels = { find: 'When finding & scoring jobs', cv: 'When writing the CV', email: 'When writing the application email' };
+  const parts = [];
+  for (const k of kinds) {
+    const v = (map[k] || '').trim();
+    if (v) parts.push(`${labels[k]}:\n${v}`);
+  }
+  if (!parts.length) {
+    const legacy = (s.customPrompt || '').trim();
+    if (legacy) parts.push(legacy);
+  }
+  return parts.join('\n\n');
+}
 
-async function chat(messages, { json = false, maxTokens = 2048, useCustomPrompt = false } = {}) {
+async function chat(messages, { json = false, maxTokens = 2048, promptKinds = null } = {}) {
   const c = cfg();
   if (!c.key) return null;
-  const extra = useCustomPrompt && customPrompt()
-    ? [{ role: 'system', content: `Additional instructions from the user (always follow these):\n${customPrompt()}` }]
-    : [];
+  // The user's standing instructions are concatenated INTO the system prompt
+  // under a highest-priority header — they override the built-in guidance.
+  const custom = promptKinds ? promptFor(promptKinds) : '';
+  const system = { role: 'system', content: P.withUserInstructions(messages[0].content, custom) };
   const res = await fetch(c.url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.key}` },
     body: JSON.stringify({
       model: c.model,
-      messages: [messages[0], ...extra, ...messages.slice(1)],
+      messages: [system, ...messages.slice(1)],
       temperature: 0.4,
       max_tokens: maxTokens,
       ...(json ? { response_format: { type: 'json_object' } } : {})
@@ -146,17 +164,12 @@ async function scoreJobs(profile, jobs) {
     description: (j.description || '').slice(0, 900)
   }));
   const result = await chatJSON([
-    {
-      role: 'system',
-      content:
-        'You are a job-match scorer. Given a candidate profile and jobs, score each job 0-100 for fit ' +
-        'and give 2-3 short reasons. Respond ONLY with JSON: {"scores":[{"id":str,"score":num,"reasons":[str]}]}'
-    },
+    { role: 'system', content: P.SCORE_JOBS },
     {
       role: 'user',
       content: `Candidate profile:\n${JSON.stringify(profile)}\n\nJobs:\n${JSON.stringify(jobList)}`
     }
-  ], { maxTokens: 3000, useCustomPrompt: true }).catch(err => {
+  ], { maxTokens: 3000, promptKinds: ['find'] }).catch(err => {
     console.error('scoreJobs failed:', err.message);
     return null;
   });
@@ -182,22 +195,29 @@ async function scoreJobs(profile, jobs) {
 
 // ---------- Tailored CV + email ----------
 
+// Weaker models often emit the email as one unbroken paragraph, which buries
+// the greeting and sign-off. Restore structure deterministically and make sure
+// a sign-off with the candidate's name is always present.
+function formatEmailBody(body, name) {
+  let b = String(body || '').trim();
+  const hasSignoff = /(best regards|kind regards|warm regards|sincerely|best wishes|regards|thank you|thanks),?\s*\n?/i.test(b.slice(-160));
+  if (!b.includes('\n')) {
+    b = b.replace(/^((?:dear|hi|hello)[^,]{0,60},)\s*/i, '$1\n\n');
+    b = b.replace(/\s*((?:best|kind|warm)\s+regards|sincerely|best wishes),?\s+/i, '\n\n$1,\n');
+  }
+  if (!hasSignoff) b += `\n\nBest regards,\n${name || ''}`.trimEnd();
+  return b.replace(/\n[ \t]+/g, '\n');
+}
+
 async function tailorApplication(profile, cvText, job, feedback = '') {
   const userMsg =
     `Candidate profile:\n${JSON.stringify(profile)}\n\nOriginal CV text:\n${cvText.slice(0, 8000)}\n\n` +
     `Job: ${job.title} at ${job.company}\nDescription:\n${(job.description || '').slice(0, 4000)}` +
-    (feedback && job.tailored ? `\n\nPrevious draft you must revise:\nEMAIL: ${job.tailored.email_body}\nCV: ${job.tailored.cv}` : '');
+    (feedback && job.tailored ? `\n\nPrevious draft you must revise:\nEMAIL: ${job.tailored.email_body}\nCV: ${job.tailored.cv}` : '') +
+    // repeated inside the user turn too — weaker models skim extra system messages
+    (feedback ? `\n\nREVISION REQUEST (mandatory — the output MUST reflect this change, it overrides every other rule including profile facts): ${feedback}` : '');
   const messages = [
-    {
-      role: 'system',
-      content:
-        'You are an expert CV writer and recruiter. Only claim experience actually present in the ' +
-        "candidate's profile/CV — never invent skills or roles they don't have. Create an ATS-optimized CV " +
-        '(plain text, clear section headers, quantified bullets, keywords mirrored from the job description) ' +
-        'and a short, specific application email tailored to this exact job — reference the company and role, ' +
-        "connect 2-3 of the candidate's real experiences to the job requirements. No placeholders like [Company]. " +
-        'Respond ONLY with JSON: {"cv":str,"email_subject":str,"email_body":str,"keywords_used":[str]}'
-    }
+    { role: 'system', content: P.TAILOR_APPLICATION }
   ];
   // The user's revision request is the highest priority — put it up front and emphatic
   if (feedback) messages.push({
@@ -205,32 +225,79 @@ async function tailorApplication(profile, cvText, job, feedback = '') {
     content: `REVISION REQUEST (highest priority — you MUST follow this exactly, even over other guidance): ${feedback}`
   });
   messages.push({ role: 'user', content: userMsg });
-  return strictJSON(messages, { maxTokens: 4000, useCustomPrompt: true }, () => ({
+  const out = await strictJSON(messages, { maxTokens: 4000, promptKinds: ['cv', 'email'] }, () => ({
     cv: `${profile.name}\n${profile.email}\n\nSUMMARY\nTailored for ${job.title} at ${job.company}.\n\nSKILLS\n${(profile.skills || []).join(', ')}\n\n(mock mode — add an API key in Settings for a real tailored CV)`,
     email_subject: `Application for ${job.title} — ${profile.name}`,
     email_body: `Dear ${job.company} team,\n\nI'm applying for the ${job.title} role. My background in ${(profile.skills || []).slice(0, 3).join(', ')} fits your requirements.\n\n(mock mode — add an API key in Settings for a fully tailored email)\n\nBest regards,\n${profile.name}`,
     keywords_used: (profile.skills || []).slice(0, 5)
   }));
+  if (out && out.email_body) out.email_body = formatEmailBody(out.email_body, profile.name);
+  return out;
+}
+
+// ---------- Quality gate: fact-check the tailored CV & email ----------
+// Every claim must trace back to the real profile/CV. One call reviews AND
+// returns a corrected version, so honesty costs one extra request per job.
+
+async function reviewTailored(profile, cvText, job, tailored, userRevision = '') {
+  const result = await chatJSON([
+    { role: 'system', content: P.FACT_CHECK },
+    {
+      role: 'user',
+      content:
+        `REAL profile:\n${JSON.stringify(profile)}\n\nREAL original CV:\n${cvText.slice(0, 8000)}\n\n` +
+        `Job: ${job.title} at ${job.company}\n\nTAILORED CV to check:\n${tailored.cv}\n\nTAILORED email to check:\n${tailored.email_body}` +
+        (userRevision
+          ? `\n\nIMPORTANT: the candidate explicitly requested this revision — it is authoritative, NOT a fabrication. Do not flag or undo changes it caused: "${userRevision}"`
+          : '')
+    }
+  ], { maxTokens: 4000 }).catch(err => {
+    console.error('reviewTailored failed:', err.message);
+    return null;
+  });
+  if (!result) return { ok: true, problems: [], checked: false }; // no key / API down → don't block
+  return {
+    ok: !!result.ok,
+    problems: Array.isArray(result.problems) ? result.problems : [],
+    cv: result.cv || null,
+    email_body: result.email_body ? formatEmailBody(result.email_body, profile.name) : null,
+    checked: true
+  };
+}
+
+// ---------- Inbox classification ----------
+// A recruiter's actual reply, an ATS auto-confirmation and a rejection must
+// land in different places on the board.
+
+async function classifyReply(job, emailText) {
+  const result = await chatJSON([
+    { role: 'system', content: P.CLASSIFY_REPLY },
+    {
+      role: 'user',
+      content: `Application: ${job.title} at ${job.company}\n\nEmail received:\n${String(emailText || '').slice(0, 4000)}`
+    }
+  ]).catch(err => {
+    console.error('classifyReply failed:', err.message);
+    return null;
+  });
+  if (!result || !result.type) return null; // caller falls back to the old behavior
+  const type = ['confirmation', 'rejection', 'interview', 'human_reply', 'other'].includes(result.type)
+    ? result.type : 'other';
+  return { related: result.related !== false, type, summary: result.summary || '' };
 }
 
 // ---------- Follow-up email ----------
 
 async function followUpEmail(profile, job, dayNumber, previousEmails) {
   const result = await chatJSON([
-    {
-      role: 'system',
-      content:
-        'Write a brief, polite, value-adding follow-up email for a job application. Do not sound desperate; ' +
-        'add one new relevant point about the candidate. ' +
-        'Respond ONLY with JSON: {"subject":str,"body":str}'
-    },
+    { role: 'system', content: P.FOLLOW_UP },
     {
       role: 'user',
       content:
         `Candidate: ${JSON.stringify(profile)}\nJob: ${job.title} at ${job.company}\n` +
         `This is the follow-up on day ${dayNumber} after applying. Previous emails sent: ${previousEmails.length}.`
     }
-  ], { useCustomPrompt: true }).catch(err => {
+  ], { promptKinds: ['email'] }).catch(err => {
     console.error('followUpEmail failed:', err.message);
     return null;
   });
@@ -238,6 +305,37 @@ async function followUpEmail(profile, job, dayNumber, previousEmails) {
   return {
     subject: `Following up: ${job.title} application — ${profile.name}`,
     body: `Hi ${job.company} team,\n\nI wanted to follow up on my application for ${job.title} (day ${dayNumber}). I remain very interested in the role.\n\n(mock mode)\n\nBest,\n${profile.name}`
+  };
+}
+
+// ---------- Anonymous product feedback for the JobPilot developer ----------
+
+async function devFeedbackReport(snap) {
+  const result = await chatJSON([
+    {
+      role: 'system',
+      content:
+        'You write a short product-feedback email to the DEVELOPER of JobPilot (a job-application ' +
+        'autopilot app) based on anonymous usage telemetry from one installation. Two sections: ' +
+        'HOW THIS USER USES JOBPILOT (2-4 lines from the numbers: manual vs auto, which sources, ' +
+        'email vs manual applies) and QUALITY & IMPROVEMENT SUGGESTIONS (numbered, max 5, concrete — ' +
+        'derived from error patterns, simulated-send counts, fact-check corrections, reply rates). ' +
+        'The data contains no personal information and neither should the email. ' +
+        'Respond ONLY with JSON: {"subject":str,"body":str}'
+    },
+    { role: 'user', content: `Telemetry since the last report:\n${JSON.stringify(snap, null, 1)}` }
+  ], { maxTokens: 1500 }).catch(err => {
+    console.error('devFeedbackReport failed:', err.message);
+    return null;
+  });
+  if (result && result.subject) return result;
+  // no key / API down → plain template, still useful
+  return {
+    subject: `JobPilot usage feedback (${snap.periodDays} days, anonymous)`,
+    body:
+      `Anonymous usage report — ${snap.periodDays} days\n\n` +
+      `HOW IT WAS USED\n${JSON.stringify(snap, null, 1)}\n\n` +
+      `(AI summary unavailable — raw numbers above. No personal data included.)`
   };
 }
 
@@ -260,7 +358,7 @@ async function insightsReport(profile, snap, trigger) {
       content:
         `Trigger: ${trigger}\nCandidate: ${JSON.stringify(profile)}\n\nPipeline data:\n${JSON.stringify(snap, null, 1)}`
     }
-  ], { maxTokens: 2500, useCustomPrompt: true }).catch(err => {
+  ], { maxTokens: 2500 }).catch(err => {
     console.error('insightsReport failed:', err.message);
     return null;
   });
@@ -275,4 +373,4 @@ async function insightsReport(profile, snap, trigger) {
   };
 }
 
-module.exports = { hasKey, providerInfo, extractProfile, scoreJobs, tailorApplication, followUpEmail, insightsReport, PROVIDERS };
+module.exports = { hasKey, providerInfo, extractProfile, scoreJobs, tailorApplication, formatEmailBody, reviewTailored, classifyReply, followUpEmail, insightsReport, devFeedbackReport, PROVIDERS };

@@ -1,0 +1,157 @@
+// Career-page sources via public ATS JSON APIs — the highest-quality feed we
+// have: no key, no scraping, near-zero ghost jobs (companies remove postings
+// from their own ATS when filled), and the URL is the real application form.
+//
+// The user lists company board slugs in Settings ("stripe, openai, ramp");
+// we probe Greenhouse / Lever / Ashby / SmartRecruiters for each slug once and
+// cache which ATS answered so later runs hit only the right endpoint.
+const { load, save } = require('../db');
+
+const TIMEOUT = 15000;
+
+function stripHtml(html) {
+  return String(html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&#\d+;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function getJson(url) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'JobPilot', Accept: 'application/json' },
+    signal: AbortSignal.timeout(TIMEOUT)
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ---- Per-ATS fetchers: each returns [{title, company, location, url, publishedAt, description}] ----
+
+async function greenhouse(slug) {
+  const data = await getJson(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(slug)}/jobs?content=true`);
+  return (data.jobs || []).map(j => ({
+    externalId: `gh-${j.id}`,
+    title: j.title,
+    company: data.name || slug,
+    location: j.location?.name || '',
+    url: j.absolute_url,
+    publishedAt: j.updated_at || j.first_published || '',
+    description: stripHtml(j.content).slice(0, 5000)
+  }));
+}
+
+async function lever(slug) {
+  const data = await getJson(`https://api.lever.co/v0/postings/${encodeURIComponent(slug)}?mode=json`);
+  if (!Array.isArray(data)) throw new Error('unexpected response');
+  return data.map(j => ({
+    externalId: `lv-${j.id}`,
+    title: j.text,
+    company: slug,
+    location: j.categories?.location || '',
+    url: j.hostedUrl,
+    publishedAt: j.createdAt ? new Date(j.createdAt).toISOString() : '',
+    description: stripHtml(j.descriptionPlain || j.description).slice(0, 5000)
+  }));
+}
+
+async function ashby(slug) {
+  const data = await getJson(`https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(slug)}`);
+  return (data.jobs || []).filter(j => j.isListed !== false).map(j => ({
+    externalId: `ab-${j.id}`,
+    title: j.title,
+    company: slug,
+    location: [j.location, j.isRemote ? 'Remote' : ''].filter(Boolean).join(' · '),
+    url: j.jobUrl || j.applyUrl || '',
+    publishedAt: j.publishedAt || '',
+    description: stripHtml(j.descriptionHtml || j.descriptionPlain || '').slice(0, 5000)
+  }));
+}
+
+async function smartrecruiters(slug) {
+  const data = await getJson(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(slug)}/postings?limit=100`);
+  const items = data.content || [];
+  // Descriptions live behind one more call each; only fetch a bounded number
+  const out = [];
+  for (const j of items.slice(0, 40)) {
+    let description = '';
+    try {
+      const d = await getJson(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(slug)}/postings/${j.id}`);
+      const sec = d.jobAd?.sections || {};
+      description = stripHtml([sec.jobDescription?.text, sec.qualifications?.text].filter(Boolean).join(' ')).slice(0, 5000);
+    } catch { /* keep listing without description */ }
+    out.push({
+      externalId: `sr-${j.id}`,
+      title: j.name,
+      company: j.company?.name || slug,
+      location: [j.location?.city, j.location?.country].filter(Boolean).join(', '),
+      url: `https://jobs.smartrecruiters.com/${encodeURIComponent(slug)}/${j.id}`,
+      publishedAt: j.releasedDate || '',
+      description
+    });
+  }
+  return out;
+}
+
+const ATS_PROBES = [
+  ['greenhouse', greenhouse],
+  ['lever', lever],
+  ['ashby', ashby],
+  ['smartrecruiters', smartrecruiters]
+];
+
+// Which ATS hosts this slug? Probe all four once, remember the answer.
+async function detectAts(slug) {
+  const db = load();
+  db.settings.atsDetected = db.settings.atsDetected || {};
+  const cached = db.settings.atsDetected[slug];
+  if (cached) return cached; // {ats} or {ats:null} for "nowhere"
+  for (const [name, fn] of ATS_PROBES) {
+    try {
+      await fn(slug); // a non-error response (even 0 jobs) means the board exists here
+      db.settings.atsDetected[slug] = { ats: name, at: Date.now() };
+      save();
+      return db.settings.atsDetected[slug];
+    } catch { /* not this ATS — try the next */ }
+  }
+  db.settings.atsDetected[slug] = { ats: null, at: Date.now() };
+  save();
+  return db.settings.atsDetected[slug];
+}
+
+function companySlugs() {
+  const s = load().settings || {};
+  return String(s.atsCompanies || '')
+    .split(/[,\n]/).map(x => x.trim().toLowerCase().replace(/\s+/g, '')).filter(Boolean);
+}
+
+// Pull all listings from every configured company board (each errors independently)
+async function searchAts() {
+  const slugs = companySlugs();
+  if (!slugs.length) return { jobs: [], errors: [] };
+  const jobs = [];
+  const errors = [];
+  const fns = Object.fromEntries(ATS_PROBES);
+  await Promise.allSettled(slugs.map(async slug => {
+    const det = await detectAts(slug);
+    if (!det.ats) { errors.push(`${slug}: no public board found on Greenhouse/Lever/Ashby/SmartRecruiters`); return; }
+    try {
+      const items = await fns[det.ats](slug);
+      for (const j of items) {
+        jobs.push({
+          id: `ats-${j.externalId}`,
+          source: 'Career page',
+          salary: '',
+          ...j
+        });
+      }
+    } catch (err) {
+      errors.push(`${slug} (${det.ats}): ${err.message}`);
+    }
+  }));
+  return { jobs, errors };
+}
+
+module.exports = { searchAts, companySlugs };

@@ -13,7 +13,8 @@ function isConfigured() {
   return !!smtpSettings();
 }
 
-async function sendEmail({ to, subject, body }) {
+// attachments: nodemailer format, e.g. [{ filename: 'CV.pdf', content: buffer }]
+async function sendEmail({ to, subject, body, attachments }) {
   const s = smtpSettings();
   if (!s || !to) return { simulated: true, to: to || null };
 
@@ -23,7 +24,7 @@ async function sendEmail({ to, subject, body }) {
   });
   const from = s.fromName ? `"${s.fromName}" <${s.smtpUser}>` : s.smtpUser;
   try {
-    await transporter.sendMail({ from, to, subject, text: body });
+    await transporter.sendMail({ from, to, subject, text: body, ...(attachments?.length ? { attachments } : {}) });
   } catch (err) {
     if (String(err.message).includes('535') || err.code === 'EAUTH') {
       throw new Error(`Gmail rejected the sign-in for ${s.smtpUser}. Double-check in Settings: it must be an App Password (myaccount.google.com/apppasswords), not your normal password, and 2-Step Verification must be ON for that account.`);

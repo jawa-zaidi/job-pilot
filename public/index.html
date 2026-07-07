@@ -75,10 +75,16 @@
           <option value="auto">Auto</option>
         </select>
       </div>
-      <div id="costLine" class="cost-line" title="Estimated API cost — AI tokens + paid job sources. Free boards and email cost nothing."></div>
+      <div id="costLine" class="cost-line" title="Estimated API cost — AI tokens + paid job sources. Free boards and email cost nothing. Rule of thumb per 100 applications (incl. follow-ups & inbox syncs): $0 on free boards + Groq free tier · ~$2–4 with LinkedIn/Naukri + a budget AI model · ~$5–7 with Claude Haiku quality."></div>
     </section>
+    <div id="runStatus" class="run-status hidden"></div>
     <div class="feedback-row">
-      <input type="text" id="feedbackInput" placeholder='Teach the AI: e.g. "avoid agency jobs" or "make emails shorter and mention my fintech work"'>
+      <select id="feedbackKind" title="Which step this instruction applies to">
+        <option value="find">🔍 Finding jobs</option>
+        <option value="cv">📄 CV</option>
+        <option value="email" selected>✉️ Email</option>
+      </select>
+      <input type="text" id="feedbackInput" placeholder='Teach the AI a rule for this step — e.g. "avoid agency jobs", "make emails shorter"'>
       <button class="btn btn-ghost btn-sm" id="feedbackBtn">Save instruction</button>
     </div>
 
@@ -102,6 +108,11 @@
     </section>
 
     <section class="board" id="board"></section>
+
+    <section class="activity-section">
+      <h2>Run log <small style="font-weight:400;color:var(--muted);font-size:12px">— one run = one find → generate → send cycle, with its real AI + API cost</small></h2>
+      <ul id="runsList" class="activity"></ul>
+    </section>
 
     <section class="activity-section">
       <h2>Activity</h2>
@@ -157,10 +168,36 @@
       <input type="password" id="setApifyToken" placeholder="apify_api_…" autocomplete="off" style="margin-top:6px">
       </div>
     </label>
-    <label class="src-row disabled">
-      <input type="checkbox" id="srcNaukri" disabled>
-      <div><strong>Naukri</strong> <span class="beta">coming soon</span><br>
-      <small>Naukri has no official API — we'll add it via scraping in an update.</small></div>
+    <label class="src-row">
+      <input type="checkbox" id="srcNaukri">
+      <div><strong>Naukri</strong> (via Apify) <span class="beta">beta</span><br>
+      <small>India's #1 job board. Uses the same Apify token as LinkedIn (the scraper runs on
+      India residential proxies — Naukri only answers those). One-time: open the Naukri scraper
+      on Apify and click Rent/Approve if the Activity feed asks for it.</small></div>
+    </label>
+    <h3>🏢 Company career pages (best quality — free, no key)</h3>
+    <label class="field">
+      <span>Companies to watch <small style="color:var(--muted)">(comma-separated board names as they appear in the career-page URL, e.g. "stripe, openai, razorpay")</small></span>
+      <textarea id="setAtsCompanies" rows="2" placeholder="stripe, openai, razorpay, postman"></textarea>
+      <small>JobPilot pulls openings straight from each company's Greenhouse / Lever / Ashby / SmartRecruiters
+      board — fresher than any job board, near-zero dead listings, and the link goes to the real application form.
+      Tip: the name is the slug in URLs like <code>boards.greenhouse.io/<b>stripe</b></code> or <code>jobs.lever.co/<b>razorpay</b></code>.</small>
+    </label>
+    <h3>🌍 Adzuna (free API — broad coverage incl. India)</h3>
+    <div class="two-col">
+      <label class="field">
+        <span>App ID</span>
+        <input type="text" id="setAdzunaAppId" placeholder="from developer.adzuna.com" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>App key</span>
+        <input type="password" id="setAdzunaAppKey" placeholder="your Adzuna app key" autocomplete="off">
+      </label>
+    </div>
+    <label class="field">
+      <span>Country code <small style="color:var(--muted)">(2 letters: in, gb, us, de…)</small></span>
+      <input type="text" id="setAdzunaCountry" maxlength="2" style="width:80px" placeholder="in">
+      <small>Free at <a href="https://developer.adzuna.com" target="_blank" style="color:var(--accent)">developer.adzuna.com</a> — register, create an app, paste ID + key.</small>
     </label>
     <h3>🎯 Job preferences (makes "Find jobs" smart)</h3>
     <label class="field">
@@ -207,10 +244,19 @@
       <small>From <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--accent)">platform.openai.com/api-keys</a> (paid account needed).</small>
     </label>
 
-    <h3>Custom AI instructions (system prompt)</h3>
+    <h3>Custom AI instructions — one per step</h3>
+    <p class="modal-sub" style="margin-top:-2px">Separate instructions for each stage. Feedback you save on the dashboard lands in the step you pick there.</p>
     <label class="field">
-      <textarea id="setCustomPrompt" rows="5" placeholder="Anything you want the AI to always do — e.g.&#10;- Keep emails under 120 words&#10;- Never apply to staffing agencies&#10;- Always mention my fintech experience"></textarea>
-      <small>Feedback you save from the dashboard also lands here. Applied to job scoring, CVs, emails and follow-ups.</small>
+      <span>🔍 When finding &amp; scoring jobs</span>
+      <textarea id="setPromptFind" rows="3" placeholder="e.g.&#10;- Never apply to staffing agencies or consultancies&#10;- Prefer product companies over service companies&#10;- Avoid roles needing 10+ years"></textarea>
+    </label>
+    <label class="field">
+      <span>📄 When writing the CV</span>
+      <textarea id="setPromptCV" rows="3" placeholder="e.g.&#10;- Lead with my fintech dashboard work&#10;- Keep it to one page of content&#10;- Use strong action verbs, quantify everything"></textarea>
+    </label>
+    <label class="field">
+      <span>✉️ When writing the application email / cover letter</span>
+      <textarea id="setPromptEmail" rows="3" placeholder="e.g.&#10;- Keep emails under 120 words&#10;- Warm but professional tone&#10;- Always mention why I want THIS company"></textarea>
     </label>
 
     <h3>Auto job discovery</h3>
@@ -226,6 +272,23 @@
       <small>Each fetch collects up to this many good matches — fewer if the sources don't have enough. Caps AI usage and how many emails go out per run.</small>
     </label>
 
+    <h3>🛡 Quality guardrails</h3>
+    <label class="field" style="display:flex;align-items:center;gap:8px">
+      <span style="margin:0">Auto mode only sends without review when the match is at least</span>
+      <input type="number" id="setAutoMinScore" min="0" max="95" style="width:64px" value="70">
+      <span style="margin:0">%</span>
+    </label>
+    <small style="color:var(--muted);display:block;margin:-6px 0 8px">Weaker matches still land on the board — they just wait for your review instead of being fired off blindly.</small>
+    <label class="field" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="setFactCheck" style="width:auto" checked>
+      <span style="margin:0">Fact-check every CV &amp; email before it goes out (blocks invented skills/claims — one extra AI call per job)</span>
+    </label>
+    <label class="field" style="display:flex;align-items:center;gap:8px">
+      <span style="margin:0">Don't apply to the same company twice within</span>
+      <input type="number" id="setCooldown" min="0" max="90" style="width:64px" value="14">
+      <span style="margin:0">days</span>
+    </label>
+
     <h3>📊 Improvement reports (auto feedback)</h3>
     <label class="field" style="display:flex;align-items:center;gap:8px">
       <input type="checkbox" id="setInsightsEnabled" style="width:auto">
@@ -238,6 +301,11 @@
       <input type="email" id="setInsightsEmail" placeholder="you@gmail.com">
       <small>Also sent after every automated run. Reports are always viewable in the app (📊 button).</small>
     </label>
+    <label class="field" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="setDevFeedback" style="width:auto" checked>
+      <span style="margin:0">Share anonymous usage feedback with the JobPilot developer (every ~6 days)</span>
+    </label>
+    <small style="color:var(--muted);display:block;margin:-6px 0 8px">Aggregate numbers only — how many jobs found/applied, which sources, error categories, costs. Never names, companies, job titles or email contents. Helps improve JobPilot; untick to opt out.</small>
 
     <h3>Email — Gmail (sends from your name)</h3>
     <label class="field">
