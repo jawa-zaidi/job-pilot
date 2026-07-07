@@ -3,9 +3,15 @@
   "version": "0.1.0",
   "description": "JobPilot — automated job search, tailored CV & email generation, application tracking with auto follow-ups",
   "main": "server/index.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jawa-zaidi/job-pilot"
+  },
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node server/index.js"
+    "dev": "node server/index.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
