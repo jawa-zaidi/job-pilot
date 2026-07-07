@@ -15,6 +15,11 @@ const { discover } = require('./discovery');
 const { verifyJobLive } = require('./verify');
 const { cvToPdfBuffer, cvFileName } = require('./pdf');
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Gmail flags bursts of near-identical mail; space consecutive REAL sends out a
+// few seconds (jittered). Skipped entirely for simulated/mock sends.
+const sendJitterMs = () => 2000 + Math.floor(Math.random() * 3000);
+
 function dailyTarget() {
   return Math.max(1, Number(load().settings?.dailyTarget) || 50);
 }
@@ -149,6 +154,7 @@ async function sendAll({ skipInsights = false, minScore = 0 } = {}) {
   const heldBack = db.applications.filter(a =>
     a.status === 'ready' && a.tailored && a.recipientEmail && (a.matchScore || 0) < minScore).length;
   if (targets.length) runs.markBusy('sending');
+  const paced = emailer.isConfigured(); // real sends → pace them; simulated → no delay
   let sent = 0, simulated = 0, failed = 0, expired = 0;
   for (const a of targets) {
     try {
@@ -164,10 +170,11 @@ async function sendAll({ skipInsights = false, minScore = 0 } = {}) {
       const attachments = [];
       try {
         const pdf = await cvToPdfBuffer(a.tailored.cv, { name: db.profile?.name });
-        attachments.push({ filename: cvFileName(db.profile?.name, a.company), content: pdf });
+        attachments.push({ filename: cvFileName(db.profile?.name, a.company, a.title), content: pdf });
       } catch (err) {
         console.error('CV PDF failed, sending text fallback:', err.message);
       }
+      if (paced && (sent + simulated) > 0) await sleep(sendJitterMs());
       const result = await emailer.sendEmail({
         to: a.recipientEmail,
         subject: a.tailored.email_subject,

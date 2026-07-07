@@ -41,13 +41,27 @@ function canonicalKey(job) {
 const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 const JUNK_EMAIL = /no-?reply|do-?not-?reply|donotreply|notifications?@|mailer-daemon|@example\.|@email\.|unsubscribe|privacy@|dpo@|legal@|compliance@|gdpr|abuse@|postmaster|webmaster|security@|support@|@sentry|@googlegroups/i;
 
+// A recruiting inbox (careers@, jobs@, hr@, recruiting@, talent@, hiring@, …)
+const ROLE_LOCAL = /^(careers?|jobs?|recruit(?:ing|ment|er)?|talent|hiring|hr|apply|applications?|joinus|hello-?jobs)(?:[.+_-]|$)/;
+// A person's address: firstname.lastname@ / f.lastname@ (two alpha parts, one separator)
+function isPersonalLocal(local) { return /^[a-z]+[._][a-z]{2,}$/.test(local); }
+
+// Prefer a high-confidence address (a recruiting inbox, then a personal
+// firstname.lastname@ address) over the first thing we see. Postings often
+// carry an unrelated partner/agency/info@ address; mailing the wrong person
+// hurts the job seeker, so a low-confidence generic address returns '' — the
+// job then routes to the manual "Your action" path instead of a bad guess.
 function extractRecruiterEmail(text) {
   const found = String(text || '').match(EMAIL_RE) || [];
+  let personal = '';
   for (const raw of found) {
     const e = raw.replace(/^[.]+|[.]+$/g, '').toLowerCase();
-    if (!JUNK_EMAIL.test(e) && e.length <= 60) return e;
+    if (e.length > 60 || JUNK_EMAIL.test(e)) continue;
+    const local = e.split('@')[0];
+    if (ROLE_LOCAL.test(local)) return e;                    // best: a recruiting inbox, wins outright
+    if (!personal && isPersonalLocal(local)) personal = e;   // fall back to a personal-looking address
   }
-  return '';
+  return personal; // '' when only a low-confidence generic address was present
 }
 
 // Is this address a no-reply machine rather than a person we could write to?

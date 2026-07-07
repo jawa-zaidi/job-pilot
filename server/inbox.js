@@ -128,11 +128,15 @@ async function syncInbox() {
         }
       }
 
-      // ---- Pass 2: platform applications (match by company/role mentions) ----
-      // Needs the AI to confirm the mail is really about this application.
+      // ---- Pass 2: company/role-mention matching (AI-confirmed) ----
+      // Catches replies that Pass 1's exact-sender match can't: platform
+      // applications (no known address) AND email-path applications whose reply
+      // came from a DIFFERENT address (ATS, a colleague, firstname.lastname@).
+      // Pass 1 already set `replied` on anything it resolved, so the `!a.replied`
+      // filter keeps those out of Pass 2 (no double-processing).
       if (llm.hasKey()) {
         const manual = db.applications
-          .filter(a => a.appliedAt && !a.recipientEmail && !a.replied && !['rejected', 'closed'].includes(a.status))
+          .filter(a => a.appliedAt && !a.replied && !['rejected', 'closed'].includes(a.status))
           .slice(0, MANUAL_SCAN_APPS);
         for (const a of manual) {
           if (llmBudget <= 0) break;

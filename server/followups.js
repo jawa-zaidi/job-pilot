@@ -9,11 +9,18 @@ const email = require('./email');
 const FOLLOW_UP_DAYS = [3, 5, 10];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Space consecutive real follow-up sends so a Sync after downtime doesn't fire
+// a burst of Gmail traffic at once. Simulated sends are not paced.
+const sendJitterMs = () => 2000 + Math.floor(Math.random() * 3000);
+
 // Returns the number of follow-ups sent in this pass
 async function processFollowUps() {
   const db = load();
   const current = Date.now();
+  const paced = email.isConfigured();
   let sentCount = 0;
+  let realSent = 0;
   let changed = false;
 
   for (const app of db.applications) {
@@ -54,6 +61,11 @@ async function processFollowUps() {
       continue;
     }
 
+    // Send at most ONE follow-up per application per pass: if the app was
+    // offline while day 3, 5 and 10 all came due, the recruiter must not get
+    // three emails in the same minute. We send the earliest still-unsent due
+    // day and break; the next due day goes out on a later pass, keeping the
+    // real-time spacing between them.
     for (const day of FOLLOW_UP_DAYS) {
       const dueAt = app.appliedAt + day * DAY_MS;
       const already = app.followups.some(f => f.day === day);
@@ -62,11 +74,12 @@ async function processFollowUps() {
       const previous = app.followups.map(f => f.email);
       let msg, result;
       try {
+        if (paced && realSent > 0) await sleep(sendJitterMs());
         msg = await llm.followUpEmail(db.profile || {}, app, day, previous);
         result = await email.sendEmail({ to: app.recipientEmail, subject: msg.subject, body: msg.body });
       } catch (err) {
         console.error('follow-up failed:', err.message);
-        continue;
+        break; // don't try the next overdue day this pass either
       }
       app.followups.push({ day, sentAt: current, email: msg, ...result });
       if (app.status === 'applied') app.status = 'followup';
@@ -75,7 +88,9 @@ async function processFollowUps() {
         'followup'
       );
       sentCount++;
+      if (!result.simulated) realSent++;
       changed = true;
+      break; // one follow-up per application per pass
     }
   }
   if (changed) save();
