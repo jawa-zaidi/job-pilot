@@ -1006,7 +1006,11 @@ async function doSearch() {
   try {
     const q = $('#searchInput').value.trim();
     const res = await api('/api/jobs/search', { method: 'POST', body: { query: q } });
-    toast(`Found ${res.added} new good matches via ${res.source} for "${res.query}"${res.skipped ? ` (${res.skipped} filtered out)` : ''}`);
+    if (!res.added && res.note) {
+      toast(res.note, true); // nothing found — show the actual cause, not a shrug
+    } else {
+      toast(`Found ${res.added} new good matches via ${res.source} for "${res.query}"${res.skipped ? ` (${res.skipped} filtered out)` : ''}`);
+    }
     refresh();
   } catch (err) { toast(err.message, true); }
   btn.disabled = false;

@@ -56,6 +56,7 @@ async function fetchBatch(target) {
   const runStart = costs.beginRun();
   let added = 0, skipped = 0;
   const used = [];
+  const notes = new Set(); // source problems ("X runs its own careers site") — shown to the user
   // Pending = jobs still moving through the PIPELINE (to review, generate or
   // send). "Your action" cards are deliberately excluded: they wait on the
   // user, cost nothing, and can sit for days — they must not starve new
@@ -72,6 +73,7 @@ async function fetchBatch(target) {
       const r = await discover(q, { activityLabel: 'Batch fetch', limit, maxAdd: remaining });
       added += r.added;
       skipped += r.skipped;
+      if (r.note) notes.add(r.note);
       used.push(q);
     } catch (err) {
       console.error(`batch fetch "${q}" failed:`, err.message);
@@ -91,6 +93,8 @@ async function fetchBatch(target) {
       'Work through them (or remove them with ✕), or raise the per-cycle target in Settings.';
     logActivity(`⚠️ ${reason}`, 'search');
   } else {
+    // sources ran but produced nothing → the toast must carry the WHY
+    if (!added && notes.size) reason = [...notes].join(' · ');
     logActivity(`Batch fetch done: ${added} new matches (${skipped} poor fits filtered) across ${used.length} searches · cost ${costs.fmt(cost.usd)}`, 'search');
   }
   save();

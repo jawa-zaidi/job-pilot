@@ -314,11 +314,11 @@ async function searchLinkedInApify(query, limit, token) {
 // changing companies in Settings NEVER serves another company's cached jobs;
 // clearAtsCache() drops it immediately on save (the key alone would still
 // serve a stale list when the user re-adds a company within the TTL).
-let atsCache = { at: 0, key: '', jobs: [] };
-function clearAtsCache() { atsCache = { at: 0, key: '', jobs: [] }; }
+let atsCache = { at: 0, key: '', jobs: [], errors: [] };
+function clearAtsCache() { atsCache = { at: 0, key: '', jobs: [], errors: [] }; }
 async function atsJobsCached() {
   const key = ats.companySlugs().join(',');
-  if (atsCache.key === key && Date.now() - atsCache.at < 10 * 60 * 1000) return atsCache.jobs;
+  if (atsCache.key === key && Date.now() - atsCache.at < 10 * 60 * 1000) return atsCache;
   const { jobs, errors } = await ats.searchAts();
   for (const e of errors) {
     console.error('ATS board error:', e);
@@ -334,8 +334,8 @@ async function atsJobsCached() {
         'error');
     }
   }
-  atsCache = { at: Date.now(), key, jobs };
-  return jobs;
+  atsCache = { at: Date.now(), key, jobs, errors };
+  return atsCache;
 }
 
 async function searchJobs(query, limit = 10) {
@@ -349,7 +349,12 @@ async function searchJobs(query, limit = 10) {
   // Career pages first — the highest-quality source we have
   if (cfg.ats) {
     try {
-      const all = await atsJobsCached();
+      const { jobs: all, errors: atsErrors } = await atsJobsCached();
+      for (const e of atsErrors) {
+        problems.push(e.includes('no public board')
+          ? `"${e.split(':')[0]}" runs its own careers site — JobPilot can only read public Greenhouse/Lever/Ashby/SmartRecruiters/Recruitee/Workable boards (most startups & scale-ups). Remove it, or reach it via Naukri/Adzuna instead`
+          : `Career pages: ${e.slice(0, 90)}`);
+      }
       const refined = refine(keywordFilter(all, query, limit * 2), prefs);
       filtered += Math.max(0, all.length - refined.length);
       jobs.push(...refined.slice(0, limit));

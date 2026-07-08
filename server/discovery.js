@@ -117,7 +117,7 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
     ].filter(Boolean).join(', ');
     logActivity(`${activityLabel} "${q}" via ${source}: ${added} good matches added${extras ? ` (${extras})` : ''}`, 'search');
   }
-  return { added, skipped, dupes, cooled, source, query: q };
+  return { added, skipped, dupes, cooled, source, query: q, note: note || '' };
 }
 
 function autoSearchConfig() {
