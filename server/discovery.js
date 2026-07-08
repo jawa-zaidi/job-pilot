@@ -38,10 +38,14 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
   const preferredTitle = require('./jobs').jobPrefs().titles[0];
   const q = (query || preferredTitle || db.profile.target_roles?.[0] || db.profile.title || 'software').trim();
 
-  const { jobs, source, filtered } = await searchJobs(q, limit);
+  const { jobs, source, filtered, note } = await searchJobs(q, limit);
 
   // A silent zero is a dead end for the user — say WHY nothing came through.
-  if (!jobs.length && filtered > 0) {
+  if (!jobs.length && note) {
+    // batch fetch runs many queries back to back — log each distinct cause once
+    const recent = (db.activity || []).slice(0, 10).some(a => a.text.includes(note.slice(0, 70)));
+    if (!recent) logActivity(`⚠️ ${note}`, 'error');
+  } else if (!jobs.length && filtered > 0) {
     logActivity(
       `${activityLabel} "${q}": ${filtered} job${filtered > 1 ? 's' : ''} found but ALL filtered out by your preferences ` +
       `(locations / posted-in-last-N-days — see Settings → 🎯 Job preferences). Loosen them to see these jobs.`,

@@ -208,6 +208,11 @@
       <small>Exact titles you want. Leave blank to search the roles extracted from your CV.</small>
     </label>
     <label class="field">
+      <span>Jobs per run <small style="color:var(--muted)">(how many good matches one "Find jobs" collects)</small></span>
+      <input type="number" id="setDailyTarget" min="1" max="200" value="50">
+      <small>One run = find → generate → send. Jobs waiting in "Your action" don't count against this. Caps AI usage and how many emails go out per run.</small>
+    </label>
+    <label class="field">
       <span>Preferred locations <small style="color:var(--muted)">(comma-separated — cities or countries, e.g. "Bangalore, India, Remote")</small></span>
       <input type="text" id="setJobLocations" placeholder="e.g. Bangalore, India, Remote">
       <small>Jobs outside these are filtered out. Add "Remote" to include remote roles. Leave blank to allow anywhere.</small>
@@ -278,11 +283,6 @@
       <span style="margin:0">Automatically search for new jobs every</span>
       <input type="number" id="setAutoSearchHours" min="1" max="24" style="width:60px" value="6">
       <span style="margin:0">hours</span>
-    </label>
-    <label class="field">
-      <span>Applications per cycle (max)</span>
-      <input type="number" id="setDailyTarget" min="1" max="200" value="50">
-      <small>Each fetch collects up to this many good matches — fewer if the sources don't have enough. Caps AI usage and how many emails go out per run.</small>
     </label>
 
     <h3>🛡 Quality guardrails</h3>

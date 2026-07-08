@@ -81,20 +81,6 @@ function stripHtml(html) {
     .trim();
 }
 
-// Fallback jobs so the demo works even offline.
-const SAMPLE_JOBS = [
-  { title: 'Senior Frontend Engineer', company: 'Nova Labs', location: 'Remote', url: 'https://example.com/jobs/1',
-    description: 'We need a React + TypeScript engineer to build our fintech dashboard. Experience with Node.js, GraphQL and testing required. You will own features end to end and work with designers.' },
-  { title: 'Full Stack Developer', company: 'Brightpath', location: 'Remote (EU)', url: 'https://example.com/jobs/2',
-    description: 'Full stack role: Node.js, Express, React, PostgreSQL, AWS. You will build APIs and dashboards for our logistics platform. 3+ years experience.' },
-  { title: 'Product Engineer', company: 'Loopwork', location: 'Remote', url: 'https://example.com/jobs/3',
-    description: 'Product-minded engineer comfortable across the stack (JavaScript, Python). Ship fast, talk to users, own outcomes. Startup experience a plus.' },
-  { title: 'Backend Engineer (Python)', company: 'DataForge', location: 'Remote (Worldwide)', url: 'https://example.com/jobs/4',
-    description: 'Python, Django, SQL, data pipelines. Build the backend powering our analytics product. Docker and AWS experience valued.' },
-  { title: 'Mobile Developer', company: 'Swiftly', location: 'Remote', url: 'https://example.com/jobs/5',
-    description: 'Flutter or React Native developer for our consumer app. Ship polished mobile experiences with a small team.' }
-];
-
 function sourcesConfig() {
   const s = load().settings || {};
   return {
@@ -316,16 +302,6 @@ async function searchLinkedInApify(query, limit, token) {
   });
 }
 
-function sampleJobs() {
-  return SAMPLE_JOBS.map(j => ({
-    id: `sample-${crypto.createHash('md5').update(j.title + j.company).digest('hex').slice(0, 8)}`,
-    source: 'Sample (offline)',
-    salary: '',
-    publishedAt: new Date().toISOString(),
-    ...j
-  }));
-}
-
 // The ATS boards return every open role per company — fetch once per batch of
 // queries, not once per query.
 let atsCache = { at: 0, jobs: [] };
@@ -355,6 +331,7 @@ async function searchJobs(query, limit = 10) {
   const prefs = jobPrefs();
   const jobs = [];
   const used = [];
+  const problems = []; // why an enabled source produced nothing — surfaced to the user
   let filtered = 0; // dropped for location/recency
 
   // Career pages first — the highest-quality source we have
@@ -367,6 +344,7 @@ async function searchJobs(query, limit = 10) {
       if (refined.length) used.push('Career pages');
     } catch (err) {
       console.error('ATS fetch failed:', err.message);
+      problems.push(`Career pages: ${err.message.slice(0, 80)}`);
     }
   }
 
@@ -383,6 +361,7 @@ async function searchJobs(query, limit = 10) {
       if (refined.length) used.push('Adzuna');
     } catch (err) {
       console.error('Adzuna fetch failed:', err.message);
+      problems.push(`Adzuna: ${err.message.slice(0, 80)}`);
     }
   }
 
@@ -406,6 +385,7 @@ async function searchJobs(query, limit = 10) {
         if (refined.length) used.push(boards[i][0]);
       } else {
         console.error(`${boards[i][0]} fetch failed:`, r.reason.message);
+        problems.push(`${boards[i][0]}: ${r.reason.message.slice(0, 60)}`);
       }
     });
   }
@@ -420,6 +400,7 @@ async function searchJobs(query, limit = 10) {
       if (refined.length) used.push('LinkedIn');
     } catch (err) {
       console.error('LinkedIn (Apify) fetch failed:', err.message);
+      problems.push(`LinkedIn: ${err.message.slice(0, 80)}`);
       if (err.message.includes('approval') || err.message.includes('rented')) {
         const db = load();
         const recent = (db.activity || []).slice(0, 20).some(a => a.text.includes('LinkedIn needs') || a.text.includes('LinkedIn scraper'));
@@ -437,6 +418,7 @@ async function searchJobs(query, limit = 10) {
       if (refined.length) used.push('Naukri');
     } catch (err) {
       console.error('Naukri (Apify) fetch failed:', err.message);
+      problems.push(`Naukri: ${err.message.slice(0, 80)}`);
       if (err.message.includes('approval') || err.message.includes('rented') || err.message.includes('token')) {
         const db = load();
         const recent = (db.activity || []).slice(0, 20).some(a => a.text.includes('Naukri scraper') || a.text.includes('Naukri needs'));
@@ -445,11 +427,21 @@ async function searchJobs(query, limit = 10) {
     }
   }
 
+  // Enabled-but-unusable sources are a config problem the user must hear about
+  if ((cfg.linkedin || cfg.naukri) && !cfg.apifyToken) {
+    problems.push('LinkedIn/Naukri are ticked but no Apify token is set (Settings → Job sources)');
+  }
+
   if (!jobs.length) {
-    // Don't fall back to sample jobs when the user has real filters — an empty
-    // result is honest ("nothing fresh in your locations"); sample jobs mislead.
-    if (prefs.locations.length || used.length) return { jobs: [], source: used.join(' + ') || 'no sources', filtered };
-    return { jobs: sampleJobs(), source: 'Sample (offline fallback)', filtered };
+    // An empty result is always explained — never padded with fake demo jobs.
+    const enabledAny = cfg.remotive || cfg.ats || cfg.adzuna || cfg.linkedin || cfg.naukri;
+    let note = '';
+    if (!enabledAny) {
+      note = 'No job sources are enabled — turn at least one on in Settings → 🔍 Job sources (the free boards need no key).';
+    } else if (problems.length) {
+      note = `Sources returned nothing — ${[...new Set(problems)].join('; ')}`;
+    }
+    return { jobs: [], source: used.join(' + ') || 'no sources', filtered, note };
   }
   // dedupe across sources on canonical company+title (career page beats
   // aggregator copy of the same role because ATS jobs are pushed first),
