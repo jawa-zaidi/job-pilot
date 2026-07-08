@@ -215,11 +215,11 @@
     <label class="field">
       <span>Preferred locations <small style="color:var(--muted)">(comma-separated — cities or countries, e.g. "Bangalore, India, Remote")</small></span>
       <input type="text" id="setJobLocations" placeholder="e.g. Bangalore, India, Remote">
-      <small>Jobs outside these are filtered out. Add "Remote" to include remote roles. Leave blank to allow anywhere.</small>
+      <small><strong>This is the filter that keeps jobs to your country/cities</strong> — e.g. "India" hides San Francisco postings. Leave blank and jobs from anywhere in the world will appear (the Adzuna country code only affects Adzuna). Add "Remote" to also include remote roles.</small>
     </label>
     <label class="field" style="display:flex;align-items:center;gap:8px">
       <input type="checkbox" id="setRemoteOk" style="width:auto" checked>
-      <span style="margin:0">Always include remote / worldwide jobs</span>
+      <span style="margin:0">Include remote / worldwide jobs <small style="color:var(--muted)">(untick to hide listings tagged Remote)</small></span>
     </label>
     <label class="field" style="display:flex;align-items:center;gap:8px">
       <span style="margin:0">Only show jobs posted in the last</span>

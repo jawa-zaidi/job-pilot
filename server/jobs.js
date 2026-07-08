@@ -130,9 +130,16 @@ function isRecent(job, maxAgeDays) {
 
 // Does a job's location satisfy the user's preferred locations?
 function matchesLocation(job, prefs) {
-  if (!prefs.locations.length) return true; // no preference set → accept everything
   const loc = (job.location || '').toLowerCase();
-  const remoteish = /remote|worldwide|anywhere|distributed/.test(loc) || loc === '';
+  // explicitly-remote listing (an empty/unknown location is NOT treated as
+  // remote here — unknown must never be dropped by the remote toggle alone)
+  const remoteTagged = /remote|worldwide|anywhere|distributed/.test(loc);
+  if (!prefs.locations.length) {
+    // No preferred locations set → any city/country passes. The remote toggle
+    // still means something on its own: unchecked = hide remote-only listings.
+    return prefs.remoteOk || !remoteTagged;
+  }
+  const remoteish = remoteTagged || loc === '';
   if (prefs.remoteOk && remoteish) return true;
   return prefs.locations.some(l => {
     const p = l.toLowerCase();
