@@ -19,7 +19,9 @@ setup.bat            # Windows (or just double-click it)
 
 That installs everything, starts the app, and opens http://localhost:4310.
 
-**First run:** the app sees there's no data yet and opens the setup screen automatically — pick your AI provider (Groq free / OpenAI), paste a key, optionally add Gmail, choose job sources, close, upload your CV.
+**First run:** the app sees there's no data yet and opens the setup screen automatically — pick your AI provider (Groq free / OpenAI / Anthropic Claude), paste a key, optionally add Gmail, choose job sources, close, upload your CV.
+
+> **Runs on localhost only by default.** The server binds to `127.0.0.1`, so only your own machine can reach it. To open it to other devices on your network (e.g. run it on one machine and use it from another), start it with `HOST=0.0.0.0` or `JOBPILOT_LAN=1` — a warning is logged when LAN mode is on. Do this only on a network you trust: anyone who can reach the app can read your CV, change settings and send email from your Gmail.
 
 **Updating:** quit the app (Ctrl+C) and run the setup command again — it pulls the latest version and restarts. Your data is never touched by updates.
 
@@ -45,12 +47,28 @@ That installs everything, starts the app, and opens http://localhost:4310.
 
 Timestamps for every apply and follow-up are stored, so schedules survive restarts and device moves (real clock, no tricks). Follow-ups stop the moment a reply is detected; 3 days after the final (day-10) follow-up with no reply, the application auto-closes as "no response".
 
+## AI provider
+
+Pick one in Settings → *AI provider & model*; JobPilot uses it for scoring, CV/email tailoring, fact-checking and inbox classification. Without a key the app runs in **mock mode** (deterministic placeholder output) so you can try the flow before paying anything.
+
+- **Groq** — free tier, fast; default `llama-3.3-70b-versatile`.
+- **OpenAI (ChatGPT)** — default `gpt-4o-mini`.
+- **Anthropic (Claude)** — default `claude-haiku-4-5-20251001` (best quality/$ in the table below).
+
+Keys can also be supplied via `GROQ_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in `.env`.
+
 ## Job sources
 
 - **Company career pages (best quality, free)** — list company board names in Settings and JobPilot pulls openings straight from their public Greenhouse / Lever / Ashby / SmartRecruiters APIs: fresher than any job board, near-zero dead listings, links go to the real application form.
 - **Free boards** — Remotive, RemoteOK, Arbeitnow (on by default).
 - **Adzuna** — free API credentials, broad coverage incl. India (set your country code).
-- **LinkedIn & Naukri** — via Apify token (beta).
+- **LinkedIn & Naukri** — via Apify token (**beta**).
+
+> ⚠️ **LinkedIn & Naukri — use at your own risk.** Scraping these platforms (via Apify) may violate their Terms of Service. They're off by default and labeled beta for this reason. Enable them only if you accept that risk; the career-page and free-board sources have no such concern.
+
+### Gmail sending limits
+
+Application emails and follow-ups send from your own Gmail over SMTP. Gmail caps a regular account at roughly **500 recipients/day** (~2,000 for Google Workspace), and bursts of near-identical mail can trip spam heuristics. JobPilot already spaces out real sends with a small delay, but keep your per-cycle target sensible (the default is 50) and expect occasional throttling if you push high volumes.
 
 ## Quality guardrails
 
@@ -77,6 +95,12 @@ Rule of thumb: to **apply** to 100 jobs, JobPilot **finds and scores ~200** (you
 | Claude Haiku (best quality/$) + all sources | ~$3.30 | ~$1.50–3 | **≈ $5–7** |
 
 Follow-ups and inbox syncs are ~15–20% of the AI total (already included). The Run log shows your real numbers — these are planning estimates.
+
+## Privacy & telemetry
+
+JobPilot stores everything locally in `~/JobPilotData` and talks only to the services you configure (your AI provider, your Gmail, your chosen job sources). Nothing is sent to the JobPilot developer unless you opt in.
+
+**Developer usage feedback — OFF by default (opt-in).** If you tick *"Share usage feedback with the JobPilot developer"* in Settings, then roughly every 6 days the app emails the developer an **aggregate, no-PII** report: counts of jobs found/applied, which sources were used, error categories, run costs, and your AI provider/model. It never includes names, companies, job titles, or email contents. Because the report is sent **from your own Gmail**, the developer does see the address it arrives from — it is content-anonymous but not sender-anonymous. Untick the box at any time to turn it off (it's off until you turn it on).
 
 ## Architecture
 
