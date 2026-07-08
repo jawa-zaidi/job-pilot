@@ -201,6 +201,11 @@
     </label>
     <h3>🎯 Job preferences (makes "Find jobs" smart)</h3>
     <label class="field">
+      <span>Preferred job titles <small style="color:var(--muted)">(comma-separated — searched first, before titles guessed from your CV)</small></span>
+      <input type="text" id="setJobTitles" placeholder="e.g. Backend Engineer, Platform Engineer, SRE">
+      <small>Exact titles you want. Leave blank to search the roles extracted from your CV.</small>
+    </label>
+    <label class="field">
       <span>Preferred locations <small style="color:var(--muted)">(comma-separated — cities or countries, e.g. "Bangalore, India, Remote")</small></span>
       <input type="text" id="setJobLocations" placeholder="e.g. Bangalore, India, Remote">
       <small>Jobs outside these are filtered out. Add "Remote" to include remote roles. Leave blank to allow anywhere.</small>
@@ -247,7 +252,7 @@
     <label class="field">
       <span>Anthropic (Claude) API key</span>
       <input type="password" id="setAnthropicKey" placeholder="sk-ant-…" autocomplete="off">
-      <small>From <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">console.anthropic.com</a> (paid account needed). Best quality/$ with Claude Haiku.</small>
+      <small>From <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">console.anthropic.com</a> (paid account needed). Haiku is the budget pick; <code>claude-sonnet-5</code> gives the best CVs &amp; emails per dollar.</small>
     </label>
 
     <h3>Custom AI instructions — one per step</h3>

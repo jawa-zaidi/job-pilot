@@ -14,7 +14,11 @@ const LLM_PRICES = {
   'llama-3.1-70b-versatile': [0.59, 0.79],
   'gpt-4o-mini':             [0.15, 0.60],
   'gpt-4o':                  [2.50, 10.00],
-  'gpt-4.1-mini':            [0.40, 1.60]
+  'gpt-4.1-mini':            [0.40, 1.60],
+  'claude-haiku-4-5-20251001': [1.00, 5.00],
+  'claude-haiku-4-5':        [1.00, 5.00],
+  'claude-sonnet-5':         [3.00, 15.00],
+  'claude-opus-4-8':         [5.00, 25.00]
 };
 const DEFAULT_LLM_PRICE = [0.60, 0.80];
 

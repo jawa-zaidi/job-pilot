@@ -838,7 +838,7 @@ applyNavState();
 const MODEL_HINTS = {
   groq: 'Groq defaults: llama-3.3-70b-versatile. Others: llama-3.1-8b-instant (faster).',
   openai: 'OpenAI defaults: gpt-4o-mini. Others: gpt-4o, gpt-4.1-mini.',
-  anthropic: 'Anthropic defaults: claude-haiku-4-5-20251001. Others: claude-sonnet-4-5 (higher quality).'
+  anthropic: 'Anthropic defaults: claude-haiku-4-5-20251001 (budget). Best results: claude-sonnet-5.'
 };
 
 async function openSettings(welcome = false) {
@@ -859,6 +859,7 @@ async function openSettings(welcome = false) {
   $('#setAutoMinScore').value = s.autoMinScore;
   $('#setFactCheck').checked = s.factCheck;
   $('#setCooldown').value = s.companyCooldownDays;
+  $('#setJobTitles').value = (s.jobTitles || []).join(', ');
   $('#setJobLocations').value = (s.jobLocations || []).join(', ');
   $('#setRemoteOk').checked = s.remoteOk;
   $('#setMaxAge').value = s.maxJobAgeDays;
@@ -932,6 +933,7 @@ $('#settingsSave').addEventListener('click', async () => {
       autoMinScore: $('#setAutoMinScore').value,
       factCheck: $('#setFactCheck').checked,
       companyCooldownDays: $('#setCooldown').value,
+      jobTitles: $('#setJobTitles').value,
       jobLocations: $('#setJobLocations').value,
       remoteOk: $('#setRemoteOk').checked,
       maxJobAgeDays: $('#setMaxAge').value,

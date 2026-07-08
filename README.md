@@ -59,7 +59,9 @@ Keys can also be supplied via `GROQ_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API
 
 ## Job sources
 
-- **Company career pages (best quality, free)** — list company board names in Settings and JobPilot pulls openings straight from their public Greenhouse / Lever / Ashby / SmartRecruiters APIs: fresher than any job board, near-zero dead listings, links go to the real application form.
+Set **preferred job titles** in Settings → Job preferences — they are searched first (before roles guessed from your CV) and matching jobs rank higher.
+
+- **Company career pages (best quality, free)** — list company board names in Settings and JobPilot pulls openings straight from their public Greenhouse / Lever / Ashby / SmartRecruiters / Recruitee / Workable APIs: fresher than any job board, near-zero dead listings, links go to the real application form.
 - **Free boards** — Remotive, RemoteOK, Arbeitnow (on by default).
 - **Adzuna** — free API credentials, broad coverage incl. India (set your country code).
 - **LinkedIn & Naukri** — via Apify token (**beta**).
@@ -72,7 +74,7 @@ Application emails and follow-ups send from your own Gmail over SMTP. Gmail caps
 
 ## Quality guardrails
 
-- **Ranking** — LLM match score + boosts for freshness (<48h), a direct recruiter email, and career-page sources; duplicates/reposts across boards are skipped (canonical company+title identity), and companies you applied to recently are cooled down (default 14 days).
+- **Ranking** — LLM match score + boosts for freshness (<48h), a direct recruiter email, career-page sources, and jobs matching your preferred titles; duplicates/reposts across boards are skipped (canonical company+title identity), and companies you applied to recently are cooled down (default 14 days).
 - **Fact-check** — every tailored CV & email passes a second AI review that removes invented skills/claims before anything goes out.
 - **Liveness check** — each posting is re-fetched right before sending; expired jobs are closed, not applied to.
 - **Auto-mode threshold** — autopilot only sends matches above your threshold (default 70%); weaker fits wait on the board for your review.

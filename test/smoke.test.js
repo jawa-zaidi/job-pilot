@@ -17,9 +17,12 @@ const http = require('node:http');
 const TMP_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'jobpilot-test-'));
 process.env.JOBPILOT_DATA = TMP_DATA;
 process.env.PORT = '0'; // ephemeral port — never clashes with a running app
-delete process.env.GROQ_API_KEY;
-delete process.env.OPENAI_API_KEY;
-delete process.env.ANTHROPIC_API_KEY;
+// Set to '' (not delete): llm.js runs dotenv.config() at require time, and
+// dotenv never overwrites an already-defined var — so '' blocks a developer's
+// .env key from leaking into the tests (and from making real, billed API calls).
+process.env.GROQ_API_KEY = '';
+process.env.OPENAI_API_KEY = '';
+process.env.ANTHROPIC_API_KEY = '';
 
 const { app } = require('../server/index');
 const llm = require('../server/llm');

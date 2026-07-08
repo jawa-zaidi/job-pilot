@@ -323,7 +323,9 @@ async function reviewTailored(profile, cvText, job, tailored, userRevision = '')
           ? `\n\nIMPORTANT: the candidate explicitly requested this revision — it is authoritative, NOT a fabrication. Do not flag or undo changes it caused: "${userRevision}"`
           : '')
     }
-  ], { maxTokens: 4000 }).catch(err => {
+    // promptKinds: the user's standing CV/email instructions ride along, so the
+    // checker knows user-mandated style choices are intentional, not defects.
+  ], { maxTokens: 4000, promptKinds: ['cv', 'email'] }).catch(err => {
     console.error('reviewTailored failed:', err.message);
     return null;
   });

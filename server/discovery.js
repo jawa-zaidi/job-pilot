@@ -15,7 +15,7 @@ function cooldownDays() {
 // Rank = LLM fit + bonuses discovery can see on its own. The match % shown to
 // the user stays the pure LLM fit; boosts only change ordering and are listed
 // with the match reasons so the ranking is explainable.
-function rankBoosts(job) {
+function rankBoosts(job, preferredTitles = []) {
   const boosts = [];
   let bonus = 0;
   const age = job.publishedAt ? (Date.now() - new Date(job.publishedAt).getTime()) / 86400000 : null;
@@ -24,13 +24,19 @@ function rankBoosts(job) {
   else if (age != null && age > 21) { bonus -= 5; boosts.push('3+ weeks old (−5)'); }
   if (job.recipientEmail) { bonus += 10; boosts.push('recruiter email found — direct apply path (+10)'); }
   if (job.source === 'Career page') { bonus += 5; boosts.push('direct from company career page (+5)'); }
+  const title = (job.title || '').toLowerCase();
+  if (preferredTitles.some(t => title.includes(t.toLowerCase()))) {
+    bonus += 6; boosts.push('matches one of your preferred job titles (+6)');
+  }
   return { bonus, boosts };
 }
 
 async function discover(query, { activityLabel = 'Job search', limit = 10, maxAdd = Infinity } = {}) {
   const db = load();
   if (!db.profile) throw new Error('Upload your CV first');
-  const q = (query || db.profile.target_roles?.[0] || db.profile.title || 'software').trim();
+  // Default query priority: user's preferred title > CV-derived role > CV title
+  const preferredTitle = require('./jobs').jobPrefs().titles[0];
+  const q = (query || preferredTitle || db.profile.target_roles?.[0] || db.profile.title || 'software').trim();
 
   const { jobs, source } = await searchJobs(q, limit);
 
@@ -61,9 +67,10 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
   const scores = fresh.length ? await llm.scoreJobs(db.profile, fresh) : {};
 
   // strongest first (fit + bonuses), so a maxAdd cap keeps the best ones
+  const preferredTitles = require('./jobs').jobPrefs().titles;
   const ranked = fresh.map(job => {
     const s = scores[String(job.id)] || { score: 50, reasons: [] };
-    const { bonus, boosts } = rankBoosts(job);
+    const { bonus, boosts } = rankBoosts(job, preferredTitles);
     return { job, score: s.score, reasons: s.reasons || [], bonus, boosts };
   }).sort((a, b) => (b.score + b.bonus) - (a.score + a.bonus));
 

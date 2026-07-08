@@ -3,8 +3,9 @@
 // from their own ATS when filled), and the URL is the real application form.
 //
 // The user lists company board slugs in Settings ("stripe, openai, ramp");
-// we probe Greenhouse / Lever / Ashby / SmartRecruiters for each slug once and
-// cache which ATS answered so later runs hit only the right endpoint.
+// we probe Greenhouse / Lever / Ashby / SmartRecruiters / Recruitee / Workable
+// for each slug once and cache which ATS answered so later runs hit only the
+// right endpoint.
 const { load, save } = require('../db');
 
 const TIMEOUT = 15000;
@@ -95,11 +96,43 @@ async function smartrecruiters(slug) {
   return out;
 }
 
+// Recruitee — keyless public offers API per company subdomain
+async function recruitee(slug) {
+  const data = await getJson(`https://${encodeURIComponent(slug)}.recruitee.com/api/offers/`);
+  if (!Array.isArray(data.offers)) throw new Error('unexpected response');
+  return data.offers.filter(j => !j.status || j.status === 'published').map(j => ({
+    externalId: `rc-${j.id}`,
+    title: j.title,
+    company: j.company_name || slug,
+    location: [j.city, j.country].filter(Boolean).join(', ') || j.location || '',
+    url: j.careers_url || j.url || '',
+    publishedAt: j.published_at || j.created_at || '',
+    description: stripHtml([j.description, j.requirements].filter(Boolean).join(' ')).slice(0, 5000)
+  }));
+}
+
+// Workable — keyless public widget API per account slug (details=true adds descriptions)
+async function workable(slug) {
+  const data = await getJson(`https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(slug)}?details=true`);
+  if (!Array.isArray(data.jobs)) throw new Error('unexpected response');
+  return data.jobs.map(j => ({
+    externalId: `wk-${j.shortcode || j.code || j.id}`,
+    title: j.title,
+    company: data.name || slug,
+    location: [j.city, j.state, j.country].filter(Boolean).join(', '),
+    url: j.url || j.application_url || '',
+    publishedAt: j.published_on || j.created_at || '',
+    description: stripHtml([j.description, j.requirements].filter(Boolean).join(' ')).slice(0, 5000)
+  }));
+}
+
 const ATS_PROBES = [
   ['greenhouse', greenhouse],
   ['lever', lever],
   ['ashby', ashby],
-  ['smartrecruiters', smartrecruiters]
+  ['smartrecruiters', smartrecruiters],
+  ['recruitee', recruitee],
+  ['workable', workable]
 ];
 
 // Which ATS hosts this slug? Probe all four once, remember the answer.
@@ -136,7 +169,7 @@ async function searchAts() {
   const fns = Object.fromEntries(ATS_PROBES);
   await Promise.allSettled(slugs.map(async slug => {
     const det = await detectAts(slug);
-    if (!det.ats) { errors.push(`${slug}: no public board found on Greenhouse/Lever/Ashby/SmartRecruiters`); return; }
+    if (!det.ats) { errors.push(`${slug}: no public board found on Greenhouse/Lever/Ashby/SmartRecruiters/Recruitee/Workable`); return; }
     try {
       const items = await fns[det.ats](slug);
       for (const j of items) {

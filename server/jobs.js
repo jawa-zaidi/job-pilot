@@ -114,7 +114,10 @@ function jobPrefs() {
   let locations = s.jobLocations;
   if (!Array.isArray(locations)) locations = s.jobLocation ? [s.jobLocation] : []; // migrate old single value
   locations = locations.map(l => String(l).trim()).filter(Boolean);
+  const titles = (Array.isArray(s.jobTitles) ? s.jobTitles : [])
+    .map(t => String(t).trim()).filter(Boolean);
   return {
+    titles,                                         // user-preferred job titles — searched first
     locations,
     remoteOk: s.remoteOk !== false,                 // treat remote/worldwide as acceptable (default yes)
     maxAgeDays: Math.max(1, Number(s.maxJobAgeDays) || 30),
@@ -161,12 +164,16 @@ function refine(jobs, prefs) {
 // Rank a board's feed against the query ourselves — some free boards ignore
 // or poorly support their own search parameter.
 function keywordFilter(jobs, query, limit) {
-  const words = String(query).toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const phrase = String(query).toLowerCase().trim();
+  const words = phrase.split(/\s+/).filter(w => w.length > 2);
   if (!words.length) return jobs.slice(0, limit);
   const scored = jobs.map(j => {
     const title = (j.title || '').toLowerCase();
     const desc = (j.description || '').toLowerCase();
     let hits = 0;
+    // the exact query phrase in the title ("backend engineer" in "Senior
+    // Backend Engineer") is the strongest relevance signal there is
+    if (phrase.length > 3 && title.includes(phrase)) hits += 10;
     for (const w of words) {
       if (title.includes(w)) hits += 3;
       else if (desc.includes(w)) hits += 1;

@@ -459,6 +459,7 @@ app.get('/api/settings', (req, res) => {
     autoMinScore: batch.autoMinScore(),
     factCheck: s.factCheck !== false,
     companyCooldownDays: s.companyCooldownDays ?? 14,
+    jobTitles: Array.isArray(s.jobTitles) ? s.jobTitles : [],
     jobLocations: Array.isArray(s.jobLocations) ? s.jobLocations : (s.jobLocation ? [s.jobLocation] : []),
     maxJobAgeDays: s.maxJobAgeDays || 30,
     preferLowCompetition: !!s.preferLowCompetition,
@@ -490,6 +491,12 @@ app.post('/api/settings', (req, res) => {
   if (req.body.autoMinScore !== undefined) db.settings.autoMinScore = Math.min(95, Math.max(0, Number(req.body.autoMinScore) || 70));
   if (req.body.factCheck !== undefined) db.settings.factCheck = !!req.body.factCheck;
   if (req.body.companyCooldownDays !== undefined) db.settings.companyCooldownDays = Math.max(0, Number(req.body.companyCooldownDays) || 0);
+  if (req.body.jobTitles !== undefined) {
+    const list = Array.isArray(req.body.jobTitles)
+      ? req.body.jobTitles
+      : String(req.body.jobTitles).split(',');
+    db.settings.jobTitles = list.map(t => String(t).trim()).filter(Boolean);
+  }
   if (req.body.jobLocations !== undefined) {
     const list = Array.isArray(req.body.jobLocations)
       ? req.body.jobLocations

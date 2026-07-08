@@ -43,8 +43,12 @@ async function fetchBatch(target) {
   runs.beginIfNeeded('manual'); // joins the auto run when one is already open
 
   const p = db.profile;
+  // The user's preferred job titles (Settings → Job preferences) are searched
+  // first — an exact title the user chose beats anything guessed from the CV.
+  // CV-derived roles and skills follow as backfill until the target is met.
+  const preferred = require('./jobs').jobPrefs().titles;
   const queries = [...new Set(
-    [...(p.target_roles || []), p.title, ...(p.skills || []).slice(0, 4).map(s => `${s}`)]
+    [...preferred, ...(p.target_roles || []), p.title, ...(p.skills || []).slice(0, 4).map(s => `${s}`)]
       .filter(Boolean).map(q => String(q).trim())
   )];
 
