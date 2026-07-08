@@ -310,10 +310,15 @@ async function searchLinkedInApify(query, limit, token) {
 }
 
 // The ATS boards return every open role per company — fetch once per batch of
-// queries, not once per query.
-let atsCache = { at: 0, jobs: [] };
+// queries, not once per query. Keyed on the configured company list, so
+// changing companies in Settings NEVER serves another company's cached jobs;
+// clearAtsCache() drops it immediately on save (the key alone would still
+// serve a stale list when the user re-adds a company within the TTL).
+let atsCache = { at: 0, key: '', jobs: [] };
+function clearAtsCache() { atsCache = { at: 0, key: '', jobs: [] }; }
 async function atsJobsCached() {
-  if (Date.now() - atsCache.at < 10 * 60 * 1000) return atsCache.jobs;
+  const key = ats.companySlugs().join(',');
+  if (atsCache.key === key && Date.now() - atsCache.at < 10 * 60 * 1000) return atsCache.jobs;
   const { jobs, errors } = await ats.searchAts();
   for (const e of errors) {
     console.error('ATS board error:', e);
@@ -329,7 +334,7 @@ async function atsJobsCached() {
         'error');
     }
   }
-  atsCache = { at: Date.now(), jobs };
+  atsCache = { at: Date.now(), key, jobs };
   return jobs;
 }
 
@@ -463,4 +468,4 @@ async function searchJobs(query, limit = 10) {
   return { jobs: unique, source: used.join(' + '), filtered };
 }
 
-module.exports = { searchJobs, sourcesConfig, jobPrefs, canonicalKey, normCompany, extractRecruiterEmail, isJunkContact };
+module.exports = { searchJobs, sourcesConfig, jobPrefs, canonicalKey, normCompany, extractRecruiterEmail, isJunkContact, clearAtsCache };

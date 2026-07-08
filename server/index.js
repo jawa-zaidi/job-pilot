@@ -6,7 +6,7 @@ const { load, save, now, logActivity, isFirstRun, DATA_DIR, saveCvOriginal,
         listProfiles, createProfile, switchProfile, deleteProfile, renameProfile } = require('./db');
 const llm = require('./llm');
 const email = require('./email');
-const { sourcesConfig } = require('./jobs');
+const { sourcesConfig, clearAtsCache } = require('./jobs');
 const { discover, autoSearchTick, autoSearchConfig, startAutoSearch } = require('./discovery');
 const batch = require('./batch');
 const insights = require('./insights');
@@ -484,6 +484,7 @@ app.post('/api/settings', (req, res) => {
   if (req.body.atsCompanies !== undefined) {
     db.settings.atsCompanies = String(req.body.atsCompanies).trim();
     db.settings.atsDetected = {}; // re-probe boards when the list changes
+    clearAtsCache();              // never serve the previous companies' cached jobs
   }
   if (req.body.adzunaAppId !== undefined) db.settings.adzunaAppId = String(req.body.adzunaAppId).trim();
   if (req.body.adzunaAppKey !== undefined && String(req.body.adzunaAppKey).trim()) db.settings.adzunaAppKey = String(req.body.adzunaAppKey).trim();
