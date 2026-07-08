@@ -133,6 +133,11 @@ function jobAgeDays(job) {
 }
 
 function isRecent(job, maxAgeDays) {
+  // A posting on the company's OWN ATS is live by definition — companies remove
+  // filled roles from their careers page, and many keep genuinely open roles up
+  // for months. The posted-in-last-N-days preference is an anti-stale filter
+  // for job BOARDS (where dead listings linger), so career-page jobs are exempt.
+  if (job.source === 'Career page') return true;
   const age = jobAgeDays(job);
   return age == null ? true : age <= maxAgeDays; // unknown date → keep (don't over-filter)
 }
@@ -327,7 +332,20 @@ let atsCache = { at: 0, jobs: [] };
 async function atsJobsCached() {
   if (Date.now() - atsCache.at < 10 * 60 * 1000) return atsCache.jobs;
   const { jobs, errors } = await ats.searchAts();
-  for (const e of errors) console.error('ATS board error:', e);
+  for (const e of errors) {
+    console.error('ATS board error:', e);
+    // "no public board found" is the user's problem to fix (a big enterprise on
+    // a custom careers site, or a typo in the slug) — tell them on the dashboard
+    // instead of returning a silent zero. Logged once, not on every refetch.
+    if (e.includes('no public board')) {
+      const db = load();
+      const already = (db.activity || []).slice(0, 30).some(a => a.text.includes(e));
+      if (!already) logActivity(
+        `⚠️ Career page "${e.split(':')[0]}" — no public job board found on Greenhouse/Lever/Ashby/SmartRecruiters/Recruitee/Workable. ` +
+        'Large enterprises (Deloitte, Google, …) run custom career sites JobPilot can\'t read; this works best for startups & scale-ups. Check the spelling of the board name, or remove it in Settings.',
+        'error');
+    }
+  }
   atsCache = { at: Date.now(), jobs };
   return jobs;
 }

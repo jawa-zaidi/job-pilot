@@ -135,15 +135,24 @@ const ATS_PROBES = [
   ['workable', workable]
 ];
 
-// Which ATS hosts this slug? Probe all four once, remember the answer.
+// Which ATS hosts this slug? Probe each once, remember the answer.
+// A probe only counts as a match when it returns actual jobs: SmartRecruiters
+// answers 200 with an empty list for ANY slug (even garbage), and Workable has
+// parked/empty accounts under common brand names — "board exists but 0 jobs"
+// is indistinguishable from "wrong company", so it must not win the detection.
 async function detectAts(slug) {
   const db = load();
   db.settings.atsDetected = db.settings.atsDetected || {};
   const cached = db.settings.atsDetected[slug];
-  if (cached) return cached; // {ats} or {ats:null} for "nowhere"
+  // Found boards re-verify weekly; misses retry daily — a transient network
+  // failure at probe time (or a board that goes live later) must not disable
+  // the company forever.
+  const maxAge = cached && cached.ats ? 7 * 86400000 : 86400000;
+  if (cached && Date.now() - (cached.at || 0) < maxAge) return cached;
   for (const [name, fn] of ATS_PROBES) {
     try {
-      await fn(slug); // a non-error response (even 0 jobs) means the board exists here
+      const items = await fn(slug);
+      if (!Array.isArray(items) || !items.length) continue; // empty ≠ proof — try the next ATS
       db.settings.atsDetected[slug] = { ats: name, at: Date.now() };
       save();
       return db.settings.atsDetected[slug];

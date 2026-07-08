@@ -762,9 +762,22 @@ async function openReports() {
   $('#reportOverlay').classList.remove('hidden');
 }
 
+// Close a modal on a true backdrop click only. A plain click handler also fires
+// when a drag STARTS inside the modal (selecting text, sliding over an input)
+// and ends on the backdrop — so require mousedown AND mouseup on the backdrop.
+function bindOverlayClose(overlayId, close) {
+  const el = $('#' + overlayId);
+  let downOnBackdrop = false;
+  el.addEventListener('mousedown', e => { downOnBackdrop = e.target.id === overlayId; });
+  el.addEventListener('click', e => {
+    if (downOnBackdrop && e.target.id === overlayId) close();
+    downOnBackdrop = false;
+  });
+}
+
 $('#reportBtn').addEventListener('click', () => openReports().catch(err => toast(err.message, true)));
 $('#reportClose').addEventListener('click', () => $('#reportOverlay').classList.add('hidden'));
-$('#reportOverlay').addEventListener('click', e => { if (e.target.id === 'reportOverlay') $('#reportOverlay').classList.add('hidden'); });
+bindOverlayClose('reportOverlay', () => $('#reportOverlay').classList.add('hidden'));
 
 $('#reportRunBtn').addEventListener('click', async e => {
   const btn = e.currentTarget;
@@ -797,7 +810,7 @@ function openProfileEditor(profile) {
 }
 
 $('#profileClose').addEventListener('click', () => $('#profileOverlay').classList.add('hidden'));
-$('#profileOverlay').addEventListener('click', e => { if (e.target.id === 'profileOverlay') $('#profileOverlay').classList.add('hidden'); });
+bindOverlayClose('profileOverlay', () => $('#profileOverlay').classList.add('hidden'));
 
 const splitList = (v, sep) => v.split(sep).map(x => x.trim()).filter(Boolean);
 
@@ -894,7 +907,7 @@ async function openSettings(welcome = false) {
 $('#setProvider').addEventListener('change', e => { $('#modelHint').textContent = MODEL_HINTS[e.target.value]; });
 $('#settingsBtn').addEventListener('click', () => openSettings());
 $('#settingsClose').addEventListener('click', () => $('#settingsOverlay').classList.add('hidden'));
-$('#settingsOverlay').addEventListener('click', e => { if (e.target.id === 'settingsOverlay') $('#settingsOverlay').classList.add('hidden'); });
+bindOverlayClose('settingsOverlay', () => $('#settingsOverlay').classList.add('hidden'));
 
 $('#settingsSave').addEventListener('click', async () => {
   try {
@@ -960,7 +973,7 @@ $('#testEmailBtn').addEventListener('click', async e => {
 // ---------- Misc wiring ----------
 
 $('#drawerClose').addEventListener('click', closeDrawer);
-$('#drawerOverlay').addEventListener('click', e => { if (e.target.id === 'drawerOverlay') closeDrawer(); });
+bindOverlayClose('drawerOverlay', closeDrawer);
 
 $('#cvInput').addEventListener('change', async e => {
   const file = e.target.files[0];

@@ -38,7 +38,15 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
   const preferredTitle = require('./jobs').jobPrefs().titles[0];
   const q = (query || preferredTitle || db.profile.target_roles?.[0] || db.profile.title || 'software').trim();
 
-  const { jobs, source } = await searchJobs(q, limit);
+  const { jobs, source, filtered } = await searchJobs(q, limit);
+
+  // A silent zero is a dead end for the user — say WHY nothing came through.
+  if (!jobs.length && filtered > 0) {
+    logActivity(
+      `${activityLabel} "${q}": ${filtered} job${filtered > 1 ? 's' : ''} found but ALL filtered out by your preferences ` +
+      `(locations / posted-in-last-N-days — see Settings → 🎯 Job preferences). Loosen them to see these jobs.`,
+      'search');
+  }
 
   // Skip anything already on the board — same source ID or the same
   // company+title from another source (reposts and cross-board duplicates).
