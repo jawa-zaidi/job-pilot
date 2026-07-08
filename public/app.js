@@ -159,10 +159,14 @@ $('#smartBtn').addEventListener('click', async e => {
     if (action === 'fetch') {
       const r = await api('/api/batch/fetch', { method: 'POST', body: {} });
       state.lastRunCost = r.cost; state.lastRunLabel = 'find';
-      toast((r.added
-        ? `Found ${r.added} good new matches (${r.skipped} poor fits filtered). Remove any you don't like (✕), then hit the button again.`
-        : `No new matches right now — ${r.skipped} jobs were screened but didn't fit, and good ones may already be on your board. Try a manual search with a different term.`)
-        + costSuffix(r.cost));
+      if (r.reason) {
+        toast(r.reason, true); // fetch didn't run — tell the user exactly why
+      } else {
+        toast((r.added
+          ? `Found ${r.added} good new matches (${r.skipped} poor fits filtered). Remove any you don't like (✕), then hit the button again.`
+          : `No new matches right now — ${r.skipped} jobs were screened but didn't fit, and good ones may already be on your board. Try a manual search with a different term.`)
+          + costSuffix(r.cost));
+      }
     } else if (action === 'generate') {
       const r = await api('/api/batch/generate', { method: 'POST' });
       state.lastRunCost = r.cost; state.lastRunLabel = 'generate';

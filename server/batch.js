@@ -56,8 +56,14 @@ async function fetchBatch(target) {
   const runStart = costs.beginRun();
   let added = 0, skipped = 0;
   const used = [];
+  // Pending = jobs still moving through the PIPELINE (to review, generate or
+  // send). "Your action" cards are deliberately excluded: they wait on the
+  // user, cost nothing, and can sit for days — they must not starve new
+  // discovery (a target of 5 with 6 action cards used to fetch NOTHING).
+  const pendingCount = () =>
+    load().applications.filter(a => ['discovered', 'approved', 'ready'].includes(a.status)).length;
   for (const q of queries) {
-    const pending = load().applications.filter(a => ['discovered', 'approved', 'ready', 'action'].includes(a.status)).length;
+    const pending = pendingCount();
     if (pending >= target) break;
     // pull more per source the further we are from the target, but never add past it
     const remaining = target - pending;
@@ -78,9 +84,17 @@ async function fetchBatch(target) {
   // fire-and-forget so it never slows the user's fetch down
   require('./devfeedback').maybeSend().catch(err => console.error('dev feedback failed:', err.message));
   const discovered = load().applications.filter(a => a.status === 'discovered').length;
-  logActivity(`Batch fetch done: ${added} new matches (${skipped} poor fits filtered) across ${used.length} searches · cost ${costs.fmt(cost.usd)}`, 'search');
+  // Never end a fetch with an unexplained zero — say what blocked it.
+  let reason = '';
+  if (!used.length) {
+    reason = `Fetch skipped: ${pendingCount()} jobs already on the board waiting for review/generation/sending (per-cycle target: ${target}). ` +
+      'Work through them (or remove them with ✕), or raise the per-cycle target in Settings.';
+    logActivity(`⚠️ ${reason}`, 'search');
+  } else {
+    logActivity(`Batch fetch done: ${added} new matches (${skipped} poor fits filtered) across ${used.length} searches · cost ${costs.fmt(cost.usd)}`, 'search');
+  }
   save();
-  return { added, skipped, queries: used, discovered, target, cost };
+  return { added, skipped, queries: used, discovered, target, cost, reason };
 }
 
 // Step 1b: approve everything still in "discovered" (user removes bad ones first)
