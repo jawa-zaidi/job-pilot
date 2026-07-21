@@ -1,14 +1,14 @@
 // JobPilot dashboard
 const COLUMNS = [
-  { id: 'discovered', label: 'Discovered', statuses: ['discovered'], color: '#4f8cff' },
-  { id: 'approved',   label: 'Approved',   statuses: ['approved'],   color: '#9d7bff' },
-  { id: 'ready',      label: 'CV Ready',   statuses: ['ready'],      color: '#7c5cff' },
-  { id: 'action',     label: 'Your action ✋', statuses: ['action'],  color: '#e0653c' },
-  { id: 'applied',    label: 'Applied',    statuses: ['applied'],    color: '#3fb96f' },
-  { id: 'followup',   label: 'Follow-up',  statuses: ['followup'],   color: '#e0a53c' },
-  { id: 'replied',    label: 'Replied ⭐',  statuses: ['replied'],    color: '#f2c94c' },
-  { id: 'interview',  label: 'Interview',  statuses: ['interview', 'offer'], color: '#38c6d0' },
-  { id: 'closed',     label: 'Closed',     statuses: ['closed', 'rejected'], color: '#5a6577' }
+  { id: 'discovered', label: 'Discovered', statuses: ['discovered'], color: '#a19786' },
+  { id: 'approved',   label: 'Approved',   statuses: ['approved'],   color: '#aebf92' },
+  { id: 'ready',      label: 'CV Ready',   statuses: ['ready'],      color: '#f6a06b' },
+  { id: 'action',     label: 'Your action ✋', statuses: ['action'],  color: '#b2622d' },
+  { id: 'applied',    label: 'Applied',    statuses: ['applied'],    color: '#728157' },
+  { id: 'followup',   label: 'Follow-up',  statuses: ['followup'],   color: '#d67f48' },
+  { id: 'replied',    label: 'Replied ⭐',  statuses: ['replied'],    color: '#d67f48' },
+  { id: 'interview',  label: 'Interview',  statuses: ['interview', 'offer'], color: '#56633f' },
+  { id: 'closed',     label: 'Closed',     statuses: ['closed', 'rejected'], color: '#c0b6a5' }
 ];
 
 let state = { applications: [], stats: null, openId: null, settings: null, lastRunCost: null, lastRunLabel: '' };
@@ -95,6 +95,7 @@ async function refresh() {
   state.settings = settings;
   renderStats(stats);
   renderBoard();
+  renderFlightPlan();
   renderSmartButton();
   renderCostLine();
   renderProfiles(profilesData.profiles);
@@ -122,6 +123,32 @@ function pipelineCounts() {
   const by = {};
   for (const a of state.applications) by[a.status] = (by[a.status] || 0) + 1;
   return { disc: by.discovered || 0, appr: by.approved || 0, ready: by.ready || 0, action: by.action || 0 };
+}
+
+// The three-step "flight plan" strip — shows the Find → Generate → Send rhythm
+// with the current stage highlighted, mirroring the big button's state.
+function renderFlightPlan() {
+  const el = $('#flightPlan');
+  if (!el) return;
+  const { disc, appr, ready } = pipelineCounts();
+  const found = (state.applications || []).length;
+  const tailored = (state.applications || []).filter(a => a.tailored).length;
+  // active: send if anything's ready, else generate if raw jobs exist, else find
+  const active = ready > 0 ? 3 : (disc + appr > 0 ? 2 : 1);
+  const steps = [
+    { n: 1, title: 'Find jobs', sub: `${found} on board` },
+    { n: 2, title: 'Generate', sub: `${tailored} tailored` },
+    { n: 3, title: 'Send', sub: `${ready} ready now` }
+  ];
+  const chip = s => {
+    const state = s.n < active ? 'done' : s.n === active ? 'active' : 'future';
+    return `<div class="fp-step ${state}">
+      <span class="fp-num">${s.n < active ? '✓' : s.n}</span>
+      <span class="fp-txt"><b>${s.title}</b><small>${esc(s.sub)}</small></span>
+    </div>`;
+  };
+  el.innerHTML = steps.map(chip).join('<span class="fp-arrow">→</span>') +
+    '<span class="fp-loop">then repeats ↻</span>';
 }
 
 function renderSmartButton() {

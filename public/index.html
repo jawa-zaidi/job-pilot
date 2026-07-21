@@ -13,7 +13,7 @@
   <input type="file" id="cvInput" accept=".pdf,.docx,.txt,.md" hidden>
 
   <aside class="sidebar">
-    <div class="logo">✈️ <span>JobPilot</span></div>
+    <div class="logo"><span class="brand-badge">✈️</span><span class="brand-text"><span>JobPilot</span><span class="brand-cap">Application autopilot</span></span></div>
 
     <div class="side-section">
       <div class="side-label">Profile</div>
@@ -51,7 +51,10 @@
   <main class="main">
     <header class="topbar">
       <button id="navToggle" class="btn btn-ghost btn-sm nav-toggle" title="Hide/show side panel">☰</button>
-      <h1>Dashboard</h1>
+      <div class="topbar-title">
+        <h1>Dashboard</h1>
+        <p class="topbar-sub">Your applications, from discovery to interview.</p>
+      </div>
       <div id="toast" class="toast"></div>
     </header>
 
@@ -63,6 +66,9 @@
       <div class="stat"><div class="stat-num" id="stInterview">0</div><div class="stat-label">Interviews</div></div>
       <div class="stat funnel-stat"><div id="funnel" class="funnel"></div><div class="stat-label">Pipeline</div></div>
     </section>
+
+    <!-- Flight plan: the Find → Generate → Send rhythm at a glance -->
+    <section class="flight-plan" id="flightPlan"></section>
 
     <!-- The two buttons -->
     <section class="action-bar">

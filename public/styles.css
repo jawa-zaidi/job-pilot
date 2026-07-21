@@ -1,19 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Caprasimo:wght@400&family=Figtree:wght@400;600;700&display=swap');
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --bg: #0d1117;
-  --panel: #161b22;
-  --panel2: #1c2330;
-  --border: #2a3240;
-  --text: #e6edf3;
-  --muted: #8b98a9;
-  --accent: #4f8cff;
-  --accent2: #7c5cff;
-  --green: #3fb96f;
-  --amber: #e0a53c;
-  --red: #e0565b;
-  --radius: 12px;
+  /* Organic design system — warm cream ground, terracotta + sage accents. */
+  --bg: #f5ead8;            /* ground */
+  --panel: #f9f4ed;         /* neutral-100 — sidebar, columns, panels */
+  --panel2: #ebddc5;        /* surface — cards, inputs */
+  --border: color-mix(in srgb, #201e1d 16%, transparent); /* divider */
+  --text: #201e1d;
+  --muted: color-mix(in srgb, #201e1d 55%, transparent);
+  --accent: #c67139;        /* terracotta */
+  --accent2: #7a8a5e;       /* sage */
+  --green: #728157;         /* sage-600 — applied / done */
+  --amber: #b2622d;         /* accent-600 — follow-ups */
+  --red: #a8432b;           /* warm red — rejected / errors */
+  --radius: 16px;
+
+  /* tonal ramps */
+  --neutral-100: #f9f4ed; --neutral-200: #eee7db; --neutral-300: #dcd3c4;
+  --neutral-400: #c0b6a5; --neutral-500: #a19786; --neutral-600: #82796a;
+  --neutral-700: #645c50; --neutral-800: #474238; --neutral-900: #2e2b25;
+  --accent-100: #fff2eb; --accent-200: #ffe1d0; --accent-300: #ffc6a5;
+  --accent-400: #f6a06b; --accent-500: #d67f48; --accent-600: #b2622d;
+  --accent-700: #8c491a; --accent-800: #643312;
+  --accent2-100: #f0fae1; --accent2-200: #e1eecc; --accent2-300: #ccdbb2;
+  --accent2-400: #aebf92; --accent2-500: #8fa073; --accent2-600: #728157;
+  --accent2-700: #56633f; --accent2-800: #3d472b;
+
+  --font-heading: "Caprasimo", Georgia, serif;
+  --font-body: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2e2b25 14%, transparent);
+  --shadow-md: 0 3px 10px color-mix(in srgb, #2e2b25 16%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #2e2b25 22%, transparent);
 }
-body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+body { background: var(--bg); color: var(--text); font: 15px/1.55 var(--font-body); }
+h1, h2, h3, h4 { font-family: var(--font-heading); font-weight: 400; letter-spacing: -.015em; }
 
 .app { display: flex; min-height: 100vh; }
 
@@ -346,3 +366,111 @@ pre.doc { background: #0b0f14; border: 1px solid var(--border); border-radius: 1
   .snav span:not(.snav-ic) { display: none; }
   .snav.active span:not(.snav-ic) { display: inline; }
 }
+
+/* ══════════════════════════ Organic theme layer ══════════════════════════ */
+/* Display type */
+.logo { display: flex; align-items: center; gap: 10px; font-family: var(--font-heading); font-weight: 400; font-size: 22px; }
+.logo span { background: none; -webkit-background-clip: initial; background-clip: initial; color: var(--text); }
+.brand-badge { width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 19px; flex-shrink: 0; box-shadow: var(--shadow-sm); }
+.brand-text { display: flex; flex-direction: column; line-height: 1.05; }
+.brand-cap { font-family: var(--font-body); font-size: 11px; color: var(--accent-700); }
+.stat-num, .card-title, .col-count, .topbar h1, .activity-section h2 { font-family: var(--font-heading); font-weight: 400; }
+.smart-btn, .btn { font-family: var(--font-heading); font-weight: 400; }
+
+/* Buttons — pill; terracotta primary, outline secondary, sage green */
+.btn { border-radius: 999px; transition: background .15s, box-shadow .15s; }
+.btn:hover { opacity: 1; }
+.btn-primary { background: var(--accent); color: var(--bg); box-shadow: var(--shadow-sm); }
+.btn-primary:hover { background: var(--accent-600); }
+.btn-primary:active { background: var(--accent-700); }
+.btn-ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+.btn-ghost:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.btn-green { background: var(--accent2-600); color: var(--bg); }
+.btn-green:hover { background: var(--accent2-700); }
+.btn-link { color: var(--accent); }
+
+/* Inputs → pill / rounded, warm surface */
+.search-box input, .profile-select, .feedback-row input, .feedback-row select,
+.filter-bar select, .filter-bar input, .field input:not([type=checkbox]), .field select,
+.fix-row input, .recipient-row input, .mode-toggle select, .mode-toggle input,
+.snav, .onboard-ai-extra input, #searchInput { border-radius: 999px; }
+.field textarea { border-radius: var(--radius); }
+
+/* Panels & cards → soft shadows, warm surfaces, no harsh borders */
+.profile-card, .stat, .batch-panel, .column, .activity li, .report-item,
+.data-box, .bstep, .settings-nav, .onboard-block, .src-row { box-shadow: var(--shadow-sm); }
+.stat, .column, .batch-panel { border-color: transparent; }
+.card { background: var(--panel2); border: 1px solid transparent; box-shadow: var(--shadow-sm); }
+.card:hover { border-color: var(--accent); box-shadow: var(--shadow-md); }
+.stat-num { font-size: 30px; }
+.col-count { background: var(--panel2); color: var(--muted); }
+
+/* Skill chips → sage tag */
+.chip { background: var(--accent2-100); color: var(--accent2-800); }
+
+/* Score pills */
+.score.hi { background: var(--accent2-200); color: var(--accent2-800); }
+.score.mid { background: var(--accent-200); color: var(--accent-800); }
+.score.lo { background: var(--neutral-200); color: var(--neutral-700); }
+
+/* Status tags / badges */
+.tag.done { color: var(--accent2-700); border-color: transparent; background: var(--accent2-100); }
+.tag.warn { color: var(--accent-800); border-color: transparent; background: var(--accent-200); }
+.badge.live { color: var(--accent2-700); border-color: color-mix(in srgb, var(--accent2) 45%, transparent); }
+.badge.mock { color: var(--accent-700); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.src-row .beta { color: var(--accent-700); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.dot.gray, .pip, .timeline li::before { background: var(--neutral-300); }
+.pip.sent { background: var(--accent-500); }
+
+/* Links & small pills */
+.card-link { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.card-link:hover { background: var(--accent-100); }
+.card-x:hover { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.column.drag-over { border-color: var(--accent); background: var(--accent-100); }
+
+/* Tinted boxes */
+.run-status.running { background: var(--accent-100); border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--text); }
+.run-status.open { background: var(--accent2-100); border-color: color-mix(in srgb, var(--accent2) 35%, transparent); color: var(--muted); }
+.action-box, .card-apply { background: var(--accent-100); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.card-apply:hover { background: var(--accent-200); }
+.risk-box { background: var(--accent-100); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.review-box { background: var(--accent2-100); border-color: color-mix(in srgb, var(--accent2) 35%, transparent); }
+.welcome-box { background: var(--accent-100); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.ai-choice:has(input:checked), .cv-drop:hover { background: var(--accent-100); border-color: var(--accent); }
+.snav.active { background: var(--accent-100); color: var(--accent-800); }
+.onboard-num, .bstep-n { background: var(--accent); }
+.onboard-status.ok { color: var(--accent2-700); }
+.feedback-row { background: var(--accent-100); border-radius: 999px; padding: 6px 8px 6px 14px; }
+
+/* Docs / mono blocks → warm */
+pre.doc { background: var(--neutral-100); border-color: var(--border); color: var(--text); }
+.jd, .match-panel { background: var(--accent2-100); }
+
+/* Overlays scrim & spinner */
+.modal-overlay, .drawer-overlay { background: color-mix(in srgb, var(--neutral-900) 50%, transparent); }
+.drawer, .modal, .settings-footer, .settings-head, .settings-nav { background: var(--panel); }
+.drawer-close { background: var(--panel2); border-color: var(--border); color: var(--muted); }
+.spinner { border-color: color-mix(in srgb, currentColor 30%, transparent); border-top-color: currentColor; }
+
+/* Topbar title + subtitle */
+.topbar { align-items: flex-start; }
+.topbar-title { flex: 1; }
+.topbar-sub { color: var(--muted); font-size: 13.5px; margin: 2px 0 0; }
+
+/* Flight plan strip */
+.flight-plan { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--panel); border-radius: var(--radius); padding: 14px 18px;
+  box-shadow: var(--shadow-sm); margin-bottom: 12px; }
+.flight-plan:empty { display: none; }
+.fp-step { display: inline-flex; align-items: center; gap: 9px; padding: 7px 14px 7px 8px; border-radius: 999px; border: 1px solid transparent; }
+.fp-num { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  font-family: var(--font-heading); font-size: 12px; background: var(--neutral-300); color: var(--neutral-700); flex-shrink: 0; }
+.fp-txt { display: flex; flex-direction: column; line-height: 1.15; }
+.fp-txt b { font-size: 13px; }
+.fp-txt small { font-size: 11px; color: var(--muted); }
+.fp-step.done .fp-num { background: var(--accent2-500); color: #fff; }
+.fp-step.active { background: var(--accent2-100); border-color: var(--accent2-300); }
+.fp-step.active .fp-num { background: var(--accent2-600); color: #fff; }
+.fp-step.active .fp-txt b { color: var(--accent2-800); }
+.fp-arrow { color: var(--neutral-400); font-size: 16px; }
+.fp-loop { margin-left: auto; font-size: 11px; color: var(--muted); }
