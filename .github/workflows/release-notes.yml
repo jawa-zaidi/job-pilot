@@ -1,0 +1,48 @@
+name: Set release notes
+
+# Writes clear, non-technical "which file do I download?" notes onto a release,
+# so the assets list (which also contains .blockmap/.zip/.yml auto-update files)
+# isn't confusing. Run manually: Actions → Set release notes → Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to annotate (e.g. v0.1.0)"
+        default: v0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write download guidance onto the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          VER="${TAG#v}"
+          cat > notes.md <<EOF
+          ## ⬇️ Which file do I download?
+
+          | Your computer | Download this one file |
+          |---|---|
+          | 🪟 **Windows** | \`JobPilot-Setup-${VER}.exe\` |
+          | 🍎 **macOS** (Apple Silicon *and* Intel) | \`JobPilot-${VER}-universal.dmg\` |
+
+          **Ignore every other file below.** The \`.blockmap\`, \`.zip\` and \`.yml\` files are only used by the app's built-in auto-updater — you never download those by hand.
+
+          ---
+
+          ### After downloading — one-time first-launch step
+          The app isn't code-signed yet, so your OS shows a one-time warning:
+
+          - 🪟 **Windows:** "Windows protected your PC" → click **More info → Run anyway**.
+          - 🍎 **macOS:** right-click the app → **Open** → **Open** (or run \`xattr -cr /Applications/JobPilot.app\` in Terminal once).
+
+          After that it opens like any normal app — no terminal, no setup. Your data lives in a \`JobPilotData\` folder in your home directory; back it up to move devices.
+          EOF
+          gh release edit "$TAG" --repo "${{ github.repository }}" --notes-file notes.md
+          echo "Updated release notes for $TAG"
