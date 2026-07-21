@@ -994,6 +994,12 @@ $('#cvInput').addEventListener('change', async e => {
     if (!res.ok) throw new Error(data.error);
     toast(`Profile extracted — ${data.profile.skills.length} skills found`);
     $('#profileOverlay').classList.add('hidden');
+    // Reflect success inside the onboarding wizard if it's open.
+    if (!$('#onboardOverlay').classList.contains('hidden')) {
+      const st = $('#onbCvStatus');
+      st.textContent = `✓ ${file.name} added — ${data.profile.skills.length} skills found`;
+      st.classList.add('ok');
+    }
     refresh();
   } catch (err) { toast(err.message, true); }
   e.target.value = '';
@@ -1037,12 +1043,66 @@ function scheduleRefresh() {
   }, delay);
 }
 
-// First run: no data found → walk the user straight into setup
+// ---------- Onboarding wizard (first run): two short pages ----------
+const ONB_HINTS = {
+  groq: '<a href="https://console.groq.com/keys" target="_blank">Get a free key →</a> (console.groq.com/keys → Create). You can also skip and add it later.',
+  ollama: 'Runs models on <b>your own computer</b> — no key, no cost, works offline. Install from <a href="https://ollama.com" target="_blank">ollama.com</a>, then run <code>ollama pull llama3.1</code>. Pick this and you\'re set.',
+  mock: 'You\'ll see sample AI output so you can explore the whole flow. Add a real AI provider anytime in Settings.'
+};
+
+function onbShowStep(n) {
+  document.querySelectorAll('.onboard-step').forEach(s => s.classList.toggle('hidden', +s.dataset.step !== n));
+  document.querySelectorAll('.onboard-progress .dot').forEach(d => d.classList.toggle('active', +d.dataset.dot <= n));
+}
+
+function onbUpdateAiExtra() {
+  const val = document.querySelector('input[name="onbAi"]:checked')?.value || 'groq';
+  $('#onbGroqKey').classList.toggle('hidden', val !== 'groq');
+  $('#onbAiHint').innerHTML = ONB_HINTS[val];
+}
+
+function openOnboard() {
+  onbShowStep(1);
+  onbUpdateAiExtra();
+  $('#onboardOverlay').classList.remove('hidden');
+}
+function closeOnboard() { $('#onboardOverlay').classList.add('hidden'); }
+
+document.querySelectorAll('input[name="onbAi"]').forEach(r => r.addEventListener('change', onbUpdateAiExtra));
+$('#onbNext').addEventListener('click', () => onbShowStep(2));
+$('#onbBack').addEventListener('click', () => onbShowStep(1));
+$('#onbSkip').addEventListener('click', closeOnboard);
+
+$('#onbStart').addEventListener('click', async () => {
+  const btn = $('#onbStart');
+  btn.disabled = true;
+  try {
+    const provider = document.querySelector('input[name="onbAi"]:checked')?.value || 'groq';
+    const body = {
+      // 'mock' isn't a real provider — leave provider on the default (groq) with
+      // no key so the app stays in mock mode until the user adds one.
+      provider: provider === 'mock' ? 'groq' : provider,
+      jobTitles: $('#onbTitles').value,
+      jobLocations: $('#onbLocations').value,
+      fromName: $('#onbFromName').value,
+      smtpUser: $('#onbGmail').value,
+      smtpPass: $('#onbGmailPass').value
+    };
+    if (provider === 'groq') body.groqKey = $('#onbGroqKey').value;
+    await api('/api/settings', { method: 'POST', body });
+    closeOnboard();
+    toast('You\'re all set ✈️ — click 🔍 Find jobs to start');
+    refresh();
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false;
+});
+
+// First run: no data found → walk the user straight into the wizard
 (async () => {
   await refresh();
   if (state.settings?.firstRun && !sessionStorage.getItem('jp_welcomed')) {
     sessionStorage.setItem('jp_welcomed', '1');
-    openSettings(true);
+    openOnboard();
   }
   scheduleRefresh();
 })();

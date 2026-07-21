@@ -351,6 +351,97 @@
   </div>
 </div>
 
+<!-- Onboarding wizard (first run) — deliberately tiny: two short pages -->
+<div id="onboardOverlay" class="modal-overlay hidden">
+  <div class="modal onboard">
+    <div class="onboard-progress">
+      <span class="dot active" data-dot="1"></span>
+      <span class="dot" data-dot="2"></span>
+    </div>
+
+    <!-- Page 1 -->
+    <section class="onboard-step" data-step="1">
+      <h2>👋 Welcome to JobPilot</h2>
+      <p class="modal-sub">Two quick steps and you're flying. You can change anything later in Settings.</p>
+
+      <div class="onboard-block">
+        <div class="onboard-num">1</div>
+        <div class="onboard-body">
+          <strong>Add your CV</strong>
+          <p class="onboard-hint">We read it once and tailor every application to it.</p>
+          <label class="cv-drop" for="cvInput">
+            <span class="cv-drop-icon">📄</span>
+            <span>Click to upload your CV <small>(PDF, DOCX, TXT)</small></span>
+          </label>
+          <div id="onbCvStatus" class="onboard-status"></div>
+        </div>
+      </div>
+
+      <div class="onboard-block">
+        <div class="onboard-num">2</div>
+        <div class="onboard-body">
+          <strong>Choose your AI</strong>
+          <p class="onboard-hint">JobPilot uses AI to score jobs and write your CVs &amp; emails. Free options first.</p>
+          <div class="ai-choices">
+            <label class="ai-choice">
+              <input type="radio" name="onbAi" value="groq" checked>
+              <div><b>Groq — free &amp; fast</b><small>Free cloud tier. One quick sign-up for a key.</small></div>
+            </label>
+            <label class="ai-choice">
+              <input type="radio" name="onbAi" value="ollama">
+              <div><b>Ollama — 100% free, on your PC</b><small>No key, works offline. Needs a one-time install.</small></div>
+            </label>
+            <label class="ai-choice">
+              <input type="radio" name="onbAi" value="mock">
+              <div><b>Just explore first</b><small>Try the whole flow with sample AI output — no key, no cost.</small></div>
+            </label>
+          </div>
+          <div id="onbAiExtra" class="onboard-ai-extra">
+            <input type="password" id="onbGroqKey" placeholder="Paste your Groq key (gsk_…)" autocomplete="off">
+            <small id="onbAiHint"><a href="https://console.groq.com/keys" target="_blank">Get a free key →</a> (console.groq.com/keys → Create). You can also skip and add it later.</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="drawer-actions onboard-actions">
+        <button class="btn btn-primary" id="onbNext">Next →</button>
+        <button class="btn-link" id="onbSkip">Skip setup</button>
+      </div>
+    </section>
+
+    <!-- Page 2 -->
+    <section class="onboard-step hidden" data-step="2">
+      <h2>🎯 Where should we look?</h2>
+      <p class="modal-sub">Just the essentials — everything else has sensible defaults.</p>
+
+      <label class="field">
+        <span>Job titles you want</span>
+        <input type="text" id="onbTitles" placeholder="e.g. Frontend Engineer, Product Designer">
+      </label>
+      <label class="field">
+        <span>Locations <small style="color:var(--muted)">(add "Remote" for remote roles)</small></span>
+        <input type="text" id="onbLocations" placeholder="e.g. Bangalore, India, Remote">
+      </label>
+
+      <details class="onboard-gmail">
+        <summary>✉️ Connect Gmail to send applications <small>(optional — you can do this later)</small></summary>
+        <label class="field"><span>Your name (email "From")</span><input type="text" id="onbFromName" placeholder="e.g. Mohammed Jawad"></label>
+        <label class="field"><span>Gmail address</span><input type="email" id="onbGmail" placeholder="you@gmail.com"></label>
+        <label class="field">
+          <span>Gmail app password</span>
+          <input type="password" id="onbGmailPass" placeholder="16-character app password" autocomplete="off">
+          <small>Google Account → Security → 2-Step Verification → App passwords.</small>
+        </label>
+      </details>
+
+      <div class="drawer-actions onboard-actions">
+        <button class="btn btn-primary" id="onbStart">Start using JobPilot ✈️</button>
+        <button class="btn-link" id="onbBack">← Back</button>
+      </div>
+    </section>
+  </div>
+</div>
+
 <!-- Profile editor modal -->
 <div id="profileOverlay" class="modal-overlay hidden">
   <div class="modal">
