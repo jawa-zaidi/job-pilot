@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "JobPilot — automated job search, tailored CV & email generation, application tracking with auto follow-ups",
   "main": "electron/main.js",
+  "author": {
+    "name": "jawa-zaidi",
+    "email": "mjawad78611092@gmail.com"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -72,7 +76,8 @@
       {
         "provider": "github",
         "owner": "jawa-zaidi",
-        "repo": "job-pilot"
+        "repo": "job-pilot",
+        "releaseType": "release"
       }
     ]
   },
