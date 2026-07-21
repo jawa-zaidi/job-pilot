@@ -121,224 +121,428 @@
   </main>
 </div>
 
-<!-- Settings modal -->
+<!-- Settings modal — left-nav sectioned page -->
 <div id="settingsOverlay" class="modal-overlay hidden">
-  <div class="modal">
+  <div class="modal settings-modal">
     <button class="drawer-close" id="settingsClose">✕</button>
-    <h2 id="settingsTitle">Settings</h2>
-    <p class="modal-sub" id="settingsSub">Everything is stored locally on your machine — nothing goes to any server except the AI/job APIs you configure.</p>
-
-    <div id="welcomeBox" class="welcome-box hidden">
-      👋 <strong>Welcome to JobPilot!</strong> A few quick things and you're flying:
-      <b>1)</b> set your preferred locations under 🎯 Job preferences, <b>2)</b> add an AI key,
-      <b>3)</b> add your Gmail for sending (optional), <b>4)</b> close this and upload your CV.
+    <div class="settings-head">
+      <h2 id="settingsTitle">Settings</h2>
+      <p class="modal-sub" id="settingsSub">Stored locally on your machine — nothing leaves your computer except the AI &amp; job APIs you set up here.</p>
     </div>
 
-    <h3>📁 Your data folder</h3>
-    <div class="data-box">
-      <code id="dataDirPath"></code>
-      <small>All your data lives in this one folder — settings at the top, and a separate
-      subfolder per profile under <code>profiles/</code> (each with its applications, history
-      and the original CV file you uploaded).
-      <strong>To move to a new device:</strong> copy this folder to the same place on the new
-      computer, run the setup command there, and everything reopens exactly as you left it.
-      Back it up like you would photos.</small>
-    </div>
+    <div class="settings-body">
+      <nav class="settings-nav" id="settingsNav">
+        <button type="button" class="snav active" data-target="set-ai"><span class="snav-ic">🤖</span><span>AI provider</span></button>
+        <button type="button" class="snav" data-target="set-sources"><span class="snav-ic">🔍</span><span>Job source APIs</span></button>
+        <button type="button" class="snav" data-target="set-prefs"><span class="snav-ic">🎯</span><span>Job preferences</span></button>
+        <button type="button" class="snav" data-target="set-auto"><span class="snav-ic">⚙️</span><span>Automation &amp; quality</span></button>
+        <button type="button" class="snav" data-target="set-apply"><span class="snav-ic">🖱️</span><span>Browser auto-apply</span></button>
+        <button type="button" class="snav" data-target="set-prompts"><span class="snav-ic">✍️</span><span>AI instructions</span></button>
+        <button type="button" class="snav" data-target="set-email"><span class="snav-ic">✉️</span><span>Email (Gmail)</span></button>
+        <button type="button" class="snav" data-target="set-reports"><span class="snav-ic">📊</span><span>Reports &amp; privacy</span></button>
+        <button type="button" class="snav" data-target="set-data"><span class="snav-ic">📁</span><span>Data &amp; backup</span></button>
+      </nav>
 
-    <h3>🔍 Job sources</h3>
-    <label class="src-row">
-      <input type="checkbox" id="srcRemotive" checked>
-      <div><strong>Free job boards</strong> — Remotive + RemoteOK + Arbeitnow<br>
-      <small>Free, work out of the box, nothing to configure.</small></div>
-    </label>
-    <label class="src-row">
-      <input type="checkbox" id="srcLinkedin">
-      <div><strong>LinkedIn</strong> (via Apify) <span class="beta">beta</span><br>
-      <small>Needs a free Apify account token:</small>
-      <details class="steps">
-        <summary>How to get the token (2 minutes)</summary>
-        <ol>
-          <li>Create a free account at <a href="https://apify.com" target="_blank">apify.com</a></li>
-          <li>Open <a href="https://console.apify.com/settings/integrations" target="_blank">Console → Settings → API &amp; Integrations</a></li>
-          <li>Copy your <em>Personal API token</em> and paste it below</li>
-          <li>One-time: open <a href="https://console.apify.com/actors/zn01OAlzP853oqn4Z?approvePermissions=true" target="_blank">the LinkedIn scraper page</a> and click <em>Approve</em> (the app will also remind you in the Activity feed if this step is missing)</li>
-        </ol>
-        <small>Apify's free plan includes $5 monthly credit — enough for a few thousand LinkedIn jobs on this pay-per-result scraper.</small>
-      </details>
-      <input type="password" id="setApifyToken" placeholder="apify_api_…" autocomplete="off" style="margin-top:6px">
+      <div class="settings-scroll" id="settingsScroll">
+
+        <section class="settings-section" id="set-ai">
+          <h3>🤖 AI provider &amp; model</h3>
+          <p class="section-sub">The AI that scores jobs and writes your CVs &amp; emails. Free options first — only fill the key for the provider you pick.</p>
+          <label class="field">
+            <span>Provider</span>
+            <select id="setProvider">
+              <option value="groq">Groq (fast &amp; free tier)</option>
+              <option value="ollama">Ollama (local — 100% free, runs on your PC)</option>
+              <option value="openai">OpenAI (ChatGPT)</option>
+              <option value="anthropic">Anthropic (Claude)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Model (blank = recommended default)</span>
+            <input type="text" id="setModel" placeholder="llama-3.3-70b-versatile">
+            <small id="modelHint"></small>
+          </label>
+          <label class="field">
+            <span>Groq API key</span>
+            <input type="password" id="setGroqKey" placeholder="gsk_…" autocomplete="off">
+            <small>Free at <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent)">console.groq.com/keys</a> — create account → API Keys → Create.</small>
+          </label>
+          <label class="field">
+            <span>Ollama endpoint <small style="color:var(--muted)">(only if you picked Ollama — blank uses the default)</small></span>
+            <input type="text" id="setOllamaUrl" placeholder="http://127.0.0.1:11434/v1/chat/completions" autocomplete="off">
+            <small><strong>100% free, runs on your own computer, no key, works offline.</strong>
+            Install from <a href="https://ollama.com" target="_blank" style="color:var(--accent)">ollama.com</a>, then in a terminal run
+            <code>ollama pull llama3.1</code> (set the model name above). Best on a machine with a decent GPU or 16&nbsp;GB+ RAM;
+            quality is a bit below the cloud models but you never pay per token.</small>
+          </label>
+          <label class="field">
+            <span>OpenAI API key</span>
+            <input type="password" id="setOpenaiKey" placeholder="sk-…" autocomplete="off">
+            <small>From <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--accent)">platform.openai.com/api-keys</a> (paid account needed).</small>
+          </label>
+          <label class="field">
+            <span>Anthropic (Claude) API key</span>
+            <input type="password" id="setAnthropicKey" placeholder="sk-ant-…" autocomplete="off">
+            <small>From <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">console.anthropic.com</a> (paid account needed). Haiku is the budget pick; <code>claude-sonnet-5</code> gives the best CVs &amp; emails per dollar.</small>
+          </label>
+        </section>
+
+        <section class="settings-section" id="set-sources">
+          <h3>🔍 Job source APIs</h3>
+          <p class="section-sub">Where JobPilot looks for openings. Free boards need nothing; the rest take a free API key.</p>
+          <label class="src-row">
+            <input type="checkbox" id="srcRemotive" checked>
+            <div><strong>Free job boards</strong> — Remotive + RemoteOK + Arbeitnow<br>
+            <small>Free, work out of the box, nothing to configure.</small></div>
+          </label>
+          <label class="src-row">
+            <input type="checkbox" id="srcLinkedin">
+            <div><strong>LinkedIn</strong> (via Apify) <span class="beta">beta</span><br>
+            <small>Needs a free Apify account token:</small>
+            <details class="steps">
+              <summary>How to get the token (2 minutes)</summary>
+              <ol>
+                <li>Create a free account at <a href="https://apify.com" target="_blank">apify.com</a></li>
+                <li>Open <a href="https://console.apify.com/settings/integrations" target="_blank">Console → Settings → API &amp; Integrations</a></li>
+                <li>Copy your <em>Personal API token</em> and paste it below</li>
+                <li>One-time: open <a href="https://console.apify.com/actors/zn01OAlzP853oqn4Z?approvePermissions=true" target="_blank">the LinkedIn scraper page</a> and click <em>Approve</em> (the app will also remind you in the Activity feed if this step is missing)</li>
+              </ol>
+              <small>Apify's free plan includes $5 monthly credit — enough for a few thousand LinkedIn jobs on this pay-per-result scraper.</small>
+            </details>
+            <input type="password" id="setApifyToken" placeholder="apify_api_…" autocomplete="off" style="margin-top:6px">
+            </div>
+          </label>
+          <label class="src-row">
+            <input type="checkbox" id="srcNaukri">
+            <div><strong>Naukri</strong> (via Apify) <span class="beta">beta</span><br>
+            <small>India's #1 job board. Uses the same Apify token as LinkedIn (the scraper runs on
+            India residential proxies — Naukri only answers those). One-time: open the Naukri scraper
+            on Apify and click Rent/Approve if the Activity feed asks for it.</small></div>
+          </label>
+          <h4 class="sub-head">🏢 Company career pages <small>(best quality — free, no key)</small></h4>
+          <label class="field">
+            <span>Companies to watch <small style="color:var(--muted)">(comma-separated board names as they appear in the career-page URL, e.g. "stripe, openai, razorpay")</small></span>
+            <textarea id="setAtsCompanies" rows="2" placeholder="stripe, openai, razorpay, postman"></textarea>
+            <small>JobPilot pulls openings straight from each company's Greenhouse / Lever / Ashby / SmartRecruiters / Recruitee / Workable
+            board — fresher than any job board, near-zero dead listings, and the link goes to the real application form.
+            Tip: the name is the slug in URLs like <code>boards.greenhouse.io/<b>stripe</b></code> or <code>jobs.lever.co/<b>razorpay</b></code>.
+            <strong>Works for startups &amp; scale-ups</strong> that use these ATSs — large enterprises (Deloitte, Google, Amazon, TCS)
+            run custom career sites JobPilot can't read; if no board is found you'll see a note in the Activity feed.</small>
+          </label>
+          <h4 class="sub-head">🌍 Adzuna <small>(free API — broad coverage incl. India)</small></h4>
+          <div class="two-col">
+            <label class="field">
+              <span>App ID</span>
+              <input type="text" id="setAdzunaAppId" placeholder="from developer.adzuna.com" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>App key</span>
+              <input type="password" id="setAdzunaAppKey" placeholder="your Adzuna app key" autocomplete="off">
+            </label>
+          </div>
+          <label class="field">
+            <span>Country code <small style="color:var(--muted)">(2 letters: in, gb, us, de…)</small></span>
+            <input type="text" id="setAdzunaCountry" maxlength="2" style="width:80px" placeholder="in">
+            <small>Free at <a href="https://developer.adzuna.com" target="_blank" style="color:var(--accent)">developer.adzuna.com</a> — register, create an app, paste ID + key.</small>
+          </label>
+        </section>
+
+        <section class="settings-section" id="set-prefs">
+          <h3>🎯 Job preferences</h3>
+          <p class="section-sub">Makes "Find jobs" smart — what to look for and where.</p>
+          <label class="field">
+            <span>Preferred job titles <small style="color:var(--muted)">(comma-separated — searched first, before titles guessed from your CV)</small></span>
+            <input type="text" id="setJobTitles" placeholder="e.g. Backend Engineer, Platform Engineer, SRE">
+            <small>Exact titles you want. Leave blank to search the roles extracted from your CV.</small>
+          </label>
+          <label class="field">
+            <span>Jobs per run <small style="color:var(--muted)">(how many good matches one "Find jobs" collects)</small></span>
+            <input type="number" id="setDailyTarget" min="1" max="200" value="50">
+            <small>One run = find → generate → send. Jobs waiting in "Your action" don't count against this. Caps AI usage and how many emails go out per run.</small>
+          </label>
+          <label class="field">
+            <span>Preferred locations <small style="color:var(--muted)">(comma-separated — cities or countries, e.g. "Bangalore, India, Remote")</small></span>
+            <input type="text" id="setJobLocations" placeholder="e.g. Bangalore, India, Remote">
+            <small><strong>This is the filter that keeps jobs to your country/cities</strong> — e.g. "India" hides San Francisco postings. Leave blank and jobs from anywhere in the world will appear (the Adzuna country code only affects Adzuna). Add "Remote" to also include remote roles.</small>
+          </label>
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="setRemoteOk" style="width:auto" checked>
+            <span style="margin:0">Include remote / worldwide jobs <small style="color:var(--muted)">(untick to hide listings tagged Remote)</small></span>
+          </label>
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <span style="margin:0">Only show jobs posted in the last</span>
+            <input type="number" id="setMaxAge" min="1" max="90" style="width:64px" value="30">
+            <span style="margin:0">days</span>
+          </label>
+          <small style="color:var(--muted);display:block;margin:-6px 0 8px">Fresher postings have far fewer applicants — better odds. 7–14 days is a good sweet spot.</small>
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="setLowComp" style="width:auto">
+            <span style="margin:0">Prefer low-competition jobs (LinkedIn: under 10 applicants)</span>
+          </label>
+        </section>
+
+        <section class="settings-section" id="set-auto">
+          <h3>⚙️ Automation &amp; quality</h3>
+          <p class="section-sub">How often JobPilot works on its own, and the guardrails that keep it honest.</p>
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="setAutoSearch" style="width:auto">
+            <span style="margin:0">Automatically search for new jobs every</span>
+            <input type="number" id="setAutoSearchHours" min="1" max="24" style="width:60px" value="6">
+            <span style="margin:0">hours</span>
+          </label>
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <span style="margin:0">Auto mode only sends without review when the match is at least</span>
+            <input type="number" id="setAutoMinScore" min="0" max="95" style="width:64px" value="70">
+            <span style="margin:0">%</span>
+          </label>
+          <small style="color:var(--muted);display:block;margin:-6px 0 8px">Weaker matches still land on the board — they just wait for your review instead of being fired off blindly.</small>
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="setFactCheck" style="width:auto" checked>
+            <span style="margin:0">Fact-check every CV &amp; email before it goes out (blocks invented skills/claims — one extra AI call per job)</span>
+          </label>
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <span style="margin:0">Don't apply to the same company twice within</span>
+            <input type="number" id="setCooldown" min="0" max="90" style="width:64px" value="14">
+            <span style="margin:0">days</span>
+          </label>
+        </section>
+
+        <section class="settings-section" id="set-apply">
+          <h3>🖱️ Browser auto-apply</h3>
+          <p class="section-sub">Opens a job's application page in <strong>your own Chrome</strong>, so you're logged in as yourself and the tailored CV is ready — then <strong>you click Apply</strong>. JobPilot never submits for you.</p>
+
+          <label class="field toggle-row">
+            <input type="checkbox" id="setAutoApplyEnabled" style="width:auto">
+            <span style="margin:0"><strong>Enable browser assisted-apply</strong> — a "🖱️ Assisted apply" button appears on <em>Your action ✋</em> cards.</span>
+          </label>
+
+          <label class="field">
+            <span>Mode</span>
+            <select id="setAutoApplyMode">
+              <option value="assisted">Assisted — just open the page, I fill &amp; click (safest, recommended)</option>
+              <option value="autofill">Auto-fill — pre-fill name/email on Greenhouse/Lever forms, I review &amp; submit</option>
+            </select>
+            <small>Auto-fill only touches simple ATS forms; LinkedIn always stays fully manual.</small>
+          </label>
+
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <span style="margin:0">Daily cap — never open more than</span>
+            <input type="number" id="setAutoApplyDailyCap" min="1" max="100" style="width:64px" value="15">
+            <span style="margin:0">applications a day</span>
+          </label>
+          <small style="color:var(--muted);display:block;margin:-6px 0 10px">Deliberately conservative. Sudden spikes in activity are the main thing that gets accounts flagged.</small>
+
+          <div class="risk-box">
+            <strong>⚠️ LinkedIn Easy Apply — read this</strong>
+            <p>LinkedIn's Terms <strong>forbid automation</strong>. Even careful use carries real risk:</p>
+            <ul>
+              <li>Temporary <strong>action blocks</strong> (can't apply/connect for hours–days)</li>
+              <li>A permanent <strong>account restriction or ban</strong></li>
+              <li>Loss of your network, messages and history on that account</li>
+            </ul>
+            <p>JobPilot lowers the risk by using your <strong>real logged-in Chrome</strong> (no bot login), never running headless, pacing actions with human-like delays and the daily cap, and leaving the final click to you — but it <strong>cannot eliminate</strong> the risk.</p>
+            <label class="field toggle-row" style="margin-top:8px">
+              <input type="checkbox" id="setAutoApplyRisk" style="width:auto">
+              <span style="margin:0">I understand and <strong>accept the risk</strong> that automating LinkedIn may get my account restricted or banned.</span>
+            </label>
+            <label class="field toggle-row">
+              <input type="checkbox" id="setAutoApplyLinkedin" style="width:auto">
+              <span style="margin:0">Enable assisted-apply on <strong>LinkedIn</strong> jobs too (requires accepting the risk above).</span>
+            </label>
+            <small style="color:var(--muted)">Greenhouse, Lever and other company career-page forms have no login and carry none of this risk — they work with just the toggle at the top.</small>
+          </div>
+        </section>
+
+        <section class="settings-section" id="set-prompts">
+          <h3>✍️ Custom AI instructions</h3>
+          <p class="section-sub">One set of rules per step. Feedback you save on the dashboard lands in the step you pick there.</p>
+          <label class="field">
+            <span>🔍 When finding &amp; scoring jobs</span>
+            <textarea id="setPromptFind" rows="3" placeholder="e.g.&#10;- Never apply to staffing agencies or consultancies&#10;- Prefer product companies over service companies&#10;- Avoid roles needing 10+ years"></textarea>
+          </label>
+          <label class="field">
+            <span>📄 When writing the CV</span>
+            <textarea id="setPromptCV" rows="3" placeholder="e.g.&#10;- Lead with my fintech dashboard work&#10;- Keep it to one page of content&#10;- Use strong action verbs, quantify everything"></textarea>
+          </label>
+          <label class="field">
+            <span>✉️ When writing the application email / cover letter</span>
+            <textarea id="setPromptEmail" rows="3" placeholder="e.g.&#10;- Keep emails under 120 words&#10;- Warm but professional tone&#10;- Always mention why I want THIS company"></textarea>
+          </label>
+        </section>
+
+        <section class="settings-section" id="set-email">
+          <h3>✉️ Email — Gmail</h3>
+          <p class="section-sub">Applications and follow-ups send from your own Gmail, under your name.</p>
+          <label class="field">
+            <span>Your name (email "From")</span>
+            <input type="text" id="setFromName" placeholder="e.g. Mohammed Jawad">
+          </label>
+          <label class="field">
+            <span>Gmail address</span>
+            <input type="email" id="setSmtpUser" placeholder="you@gmail.com">
+          </label>
+          <label class="field">
+            <span>Gmail app password</span>
+            <input type="password" id="setSmtpPass" placeholder="16-character app password" autocomplete="off">
+            <small>Google Account → Security → 2-Step Verification → App passwords. Also used to read your inbox for the Sync button.</small>
+          </label>
+          <button class="btn btn-ghost btn-sm" id="testEmailBtn">Send test email to myself</button>
+        </section>
+
+        <section class="settings-section" id="set-reports">
+          <h3>📊 Reports &amp; privacy</h3>
+          <p class="section-sub">Automated improvement reports, and what (if anything) is shared.</p>
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="setInsightsEnabled" style="width:auto">
+            <span style="margin:0">Analyze my results and email me improvement points every</span>
+            <input type="number" id="setInsightsEvery" min="5" max="500" style="width:64px" value="50">
+            <span style="margin:0">applications</span>
+          </label>
+          <label class="field">
+            <span>Send reports to</span>
+            <input type="email" id="setInsightsEmail" placeholder="you@gmail.com">
+            <small>Also sent after every automated run. Reports are always viewable in the app (📊 button).</small>
+          </label>
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="setDevFeedback" style="width:auto">
+            <span style="margin:0">Share usage feedback with the JobPilot developer (off by default; every ~6 days)</span>
+          </label>
+          <small style="color:var(--muted);display:block;margin:-6px 0 8px">Off unless you tick this. Aggregate numbers only — how many jobs found/applied, which sources, error categories, costs. Never names, companies, job titles or email contents. Note: it's sent from your own Gmail, so the developer sees the address it comes from (the report body carries no personal data).</small>
+        </section>
+
+        <section class="settings-section" id="set-data">
+          <h3>📁 Data &amp; backup</h3>
+          <p class="section-sub">Everything lives in one portable folder.</p>
+          <div class="data-box">
+            <code id="dataDirPath"></code>
+            <small>All your data lives in this one folder — settings at the top, and a separate
+            subfolder per profile under <code>profiles/</code> (each with its applications, history
+            and the original CV file you uploaded).
+            <strong>To move to a new device:</strong> copy this folder to the same place on the new
+            computer, run the setup command there, and everything reopens exactly as you left it.
+            Back it up like you would photos.</small>
+          </div>
+        </section>
+
       </div>
-    </label>
-    <label class="src-row">
-      <input type="checkbox" id="srcNaukri">
-      <div><strong>Naukri</strong> (via Apify) <span class="beta">beta</span><br>
-      <small>India's #1 job board. Uses the same Apify token as LinkedIn (the scraper runs on
-      India residential proxies — Naukri only answers those). One-time: open the Naukri scraper
-      on Apify and click Rent/Approve if the Activity feed asks for it.</small></div>
-    </label>
-    <h3>🏢 Company career pages (best quality — free, no key)</h3>
-    <label class="field">
-      <span>Companies to watch <small style="color:var(--muted)">(comma-separated board names as they appear in the career-page URL, e.g. "stripe, openai, razorpay")</small></span>
-      <textarea id="setAtsCompanies" rows="2" placeholder="stripe, openai, razorpay, postman"></textarea>
-      <small>JobPilot pulls openings straight from each company's Greenhouse / Lever / Ashby / SmartRecruiters / Recruitee / Workable
-      board — fresher than any job board, near-zero dead listings, and the link goes to the real application form.
-      Tip: the name is the slug in URLs like <code>boards.greenhouse.io/<b>stripe</b></code> or <code>jobs.lever.co/<b>razorpay</b></code>.
-      <strong>Works for startups &amp; scale-ups</strong> that use these ATSs — large enterprises (Deloitte, Google, Amazon, TCS)
-      run custom career sites JobPilot can't read; if no board is found you'll see a note in the Activity feed.</small>
-    </label>
-    <h3>🌍 Adzuna (free API — broad coverage incl. India)</h3>
-    <div class="two-col">
+    </div>
+
+    <div class="settings-footer">
+      <button class="btn btn-primary" id="settingsSave">Save all settings</button>
+      <span class="settings-foot-note">Saved locally &amp; applied immediately.</span>
+    </div>
+  </div>
+</div>
+
+<!-- Onboarding wizard (first run) — deliberately tiny: two short pages -->
+<div id="onboardOverlay" class="modal-overlay hidden">
+  <div class="modal onboard">
+    <div class="onboard-progress">
+      <span class="dot active" data-dot="1"></span>
+      <span class="dot" data-dot="2"></span>
+    </div>
+
+    <!-- Page 1 -->
+    <section class="onboard-step" data-step="1">
+      <h2>👋 Welcome to JobPilot</h2>
+      <p class="modal-sub">Two quick steps and you're flying. You can change anything later in Settings.</p>
+
+      <div class="onboard-block">
+        <div class="onboard-num">1</div>
+        <div class="onboard-body">
+          <strong>Add your CV</strong>
+          <p class="onboard-hint">We read it once and tailor every application to it.</p>
+          <label class="cv-drop" for="cvInput">
+            <span class="cv-drop-icon">📄</span>
+            <span>Click to upload your CV <small>(PDF, DOCX, TXT)</small></span>
+          </label>
+          <div id="onbCvStatus" class="onboard-status"></div>
+        </div>
+      </div>
+
+      <div class="onboard-block">
+        <div class="onboard-num">2</div>
+        <div class="onboard-body">
+          <strong>Choose your AI</strong>
+          <p class="onboard-hint">JobPilot uses AI to score jobs and write your CVs &amp; emails. Free options first.</p>
+          <div class="ai-choices">
+            <label class="ai-choice">
+              <input type="radio" name="onbAi" value="groq" checked>
+              <div><b>Groq — free &amp; fast</b><small>Free cloud tier. One quick sign-up for a key.</small></div>
+            </label>
+            <label class="ai-choice">
+              <input type="radio" name="onbAi" value="ollama">
+              <div><b>Ollama — 100% free, on your PC</b><small>No key, works offline. Needs a one-time install.</small></div>
+            </label>
+            <label class="ai-choice">
+              <input type="radio" name="onbAi" value="mock">
+              <div><b>Just explore first</b><small>Try the whole flow with sample AI output — no key, no cost.</small></div>
+            </label>
+          </div>
+          <div id="onbAiExtra" class="onboard-ai-extra">
+            <input type="password" id="onbGroqKey" placeholder="Paste your Groq key (gsk_…)" autocomplete="off">
+            <small id="onbAiHint"><a href="https://console.groq.com/keys" target="_blank">Get a free key →</a> (console.groq.com/keys → Create). You can also skip and add it later.</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="drawer-actions onboard-actions">
+        <button class="btn btn-primary" id="onbNext">Next →</button>
+        <button class="btn-link" id="onbSkip">Skip setup</button>
+      </div>
+    </section>
+
+    <!-- Page 2 -->
+    <section class="onboard-step hidden" data-step="2">
+      <h2>🎯 Where should we look?</h2>
+      <p class="modal-sub">Just the essentials — everything else has sensible defaults.</p>
+
       <label class="field">
-        <span>App ID</span>
-        <input type="text" id="setAdzunaAppId" placeholder="from developer.adzuna.com" autocomplete="off">
+        <span>Job titles you want</span>
+        <input type="text" id="onbTitles" placeholder="e.g. Frontend Engineer, Product Designer">
       </label>
       <label class="field">
-        <span>App key</span>
-        <input type="password" id="setAdzunaAppKey" placeholder="your Adzuna app key" autocomplete="off">
+        <span>Locations <small style="color:var(--muted)">(add "Remote" for remote roles)</small></span>
+        <input type="text" id="onbLocations" placeholder="e.g. Bangalore, India, Remote">
       </label>
-    </div>
-    <label class="field">
-      <span>Country code <small style="color:var(--muted)">(2 letters: in, gb, us, de…)</small></span>
-      <input type="text" id="setAdzunaCountry" maxlength="2" style="width:80px" placeholder="in">
-      <small>Free at <a href="https://developer.adzuna.com" target="_blank" style="color:var(--accent)">developer.adzuna.com</a> — register, create an app, paste ID + key.</small>
-    </label>
-    <h3>🎯 Job preferences (makes "Find jobs" smart)</h3>
-    <label class="field">
-      <span>Preferred job titles <small style="color:var(--muted)">(comma-separated — searched first, before titles guessed from your CV)</small></span>
-      <input type="text" id="setJobTitles" placeholder="e.g. Backend Engineer, Platform Engineer, SRE">
-      <small>Exact titles you want. Leave blank to search the roles extracted from your CV.</small>
-    </label>
-    <label class="field">
-      <span>Jobs per run <small style="color:var(--muted)">(how many good matches one "Find jobs" collects)</small></span>
-      <input type="number" id="setDailyTarget" min="1" max="200" value="50">
-      <small>One run = find → generate → send. Jobs waiting in "Your action" don't count against this. Caps AI usage and how many emails go out per run.</small>
-    </label>
-    <label class="field">
-      <span>Preferred locations <small style="color:var(--muted)">(comma-separated — cities or countries, e.g. "Bangalore, India, Remote")</small></span>
-      <input type="text" id="setJobLocations" placeholder="e.g. Bangalore, India, Remote">
-      <small><strong>This is the filter that keeps jobs to your country/cities</strong> — e.g. "India" hides San Francisco postings. Leave blank and jobs from anywhere in the world will appear (the Adzuna country code only affects Adzuna). Add "Remote" to also include remote roles.</small>
-    </label>
-    <label class="field" style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="setRemoteOk" style="width:auto" checked>
-      <span style="margin:0">Include remote / worldwide jobs <small style="color:var(--muted)">(untick to hide listings tagged Remote)</small></span>
-    </label>
-    <label class="field" style="display:flex;align-items:center;gap:8px">
-      <span style="margin:0">Only show jobs posted in the last</span>
-      <input type="number" id="setMaxAge" min="1" max="90" style="width:64px" value="30">
-      <span style="margin:0">days</span>
-    </label>
-    <small style="color:var(--muted);display:block;margin:-6px 0 8px">Fresher postings have far fewer applicants — better odds. 7–14 days is a good sweet spot.</small>
-    <label class="field" style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="setLowComp" style="width:auto">
-      <span style="margin:0">Prefer low-competition jobs (LinkedIn: under 10 applicants)</span>
-    </label>
 
-    <h3>AI provider &amp; model</h3>
-    <label class="field">
-      <span>Provider</span>
-      <select id="setProvider">
-        <option value="groq">Groq (fast &amp; free tier)</option>
-        <option value="openai">OpenAI (ChatGPT)</option>
-        <option value="anthropic">Anthropic (Claude)</option>
-      </select>
-    </label>
-    <label class="field">
-      <span>Model (blank = recommended default)</span>
-      <input type="text" id="setModel" placeholder="llama-3.3-70b-versatile">
-      <small id="modelHint"></small>
-    </label>
-    <label class="field">
-      <span>Groq API key</span>
-      <input type="password" id="setGroqKey" placeholder="gsk_…" autocomplete="off">
-      <small>Free at <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent)">console.groq.com/keys</a> — create account → API Keys → Create.</small>
-    </label>
-    <label class="field">
-      <span>OpenAI API key</span>
-      <input type="password" id="setOpenaiKey" placeholder="sk-…" autocomplete="off">
-      <small>From <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--accent)">platform.openai.com/api-keys</a> (paid account needed).</small>
-    </label>
-    <label class="field">
-      <span>Anthropic (Claude) API key</span>
-      <input type="password" id="setAnthropicKey" placeholder="sk-ant-…" autocomplete="off">
-      <small>From <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">console.anthropic.com</a> (paid account needed). Haiku is the budget pick; <code>claude-sonnet-5</code> gives the best CVs &amp; emails per dollar.</small>
-    </label>
+      <details class="onboard-gmail">
+        <summary>✉️ Connect Gmail to send applications <small>(optional — you can do this later)</small></summary>
+        <label class="field"><span>Your name (email "From")</span><input type="text" id="onbFromName" placeholder="e.g. Mohammed Jawad"></label>
+        <label class="field"><span>Gmail address</span><input type="email" id="onbGmail" placeholder="you@gmail.com"></label>
+        <label class="field">
+          <span>Gmail app password</span>
+          <input type="password" id="onbGmailPass" placeholder="16-character app password" autocomplete="off">
+          <small>Google Account → Security → 2-Step Verification → App passwords.</small>
+        </label>
+      </details>
 
-    <h3>Custom AI instructions — one per step</h3>
-    <p class="modal-sub" style="margin-top:-2px">Separate instructions for each stage. Feedback you save on the dashboard lands in the step you pick there.</p>
-    <label class="field">
-      <span>🔍 When finding &amp; scoring jobs</span>
-      <textarea id="setPromptFind" rows="3" placeholder="e.g.&#10;- Never apply to staffing agencies or consultancies&#10;- Prefer product companies over service companies&#10;- Avoid roles needing 10+ years"></textarea>
-    </label>
-    <label class="field">
-      <span>📄 When writing the CV</span>
-      <textarea id="setPromptCV" rows="3" placeholder="e.g.&#10;- Lead with my fintech dashboard work&#10;- Keep it to one page of content&#10;- Use strong action verbs, quantify everything"></textarea>
-    </label>
-    <label class="field">
-      <span>✉️ When writing the application email / cover letter</span>
-      <textarea id="setPromptEmail" rows="3" placeholder="e.g.&#10;- Keep emails under 120 words&#10;- Warm but professional tone&#10;- Always mention why I want THIS company"></textarea>
-    </label>
+      <details class="onboard-gmail">
+        <summary>🖱️ Browser assisted-apply <small>(optional — apply on the platform in your own Chrome)</small></summary>
+        <label class="field toggle-row" style="margin-top:10px">
+          <input type="checkbox" id="onbAutoApply" style="width:auto">
+          <span style="margin:0">Show a "Assisted apply" button on jobs you apply to yourself — it opens the page in <strong>your Chrome</strong>; <strong>you</strong> click Apply. JobPilot never submits for you.</span>
+        </label>
+        <div class="risk-box" style="margin-top:6px">
+          <strong>⚠️ LinkedIn is riskier</strong>
+          <p>LinkedIn's Terms forbid automation — using it can lead to an <strong>action block or a permanent account ban</strong>. We reduce the risk (your real logged-in Chrome, no bot login, human-like pacing, you click Apply) but can't remove it.</p>
+          <label class="field toggle-row">
+            <input type="checkbox" id="onbAutoApplyRisk" style="width:auto">
+            <span style="margin:0">I <strong>accept the risk</strong> of LinkedIn restricting or banning my account.</span>
+          </label>
+          <label class="field toggle-row">
+            <input type="checkbox" id="onbAutoApplyLinkedin" style="width:auto">
+            <span style="margin:0">Also enable it on <strong>LinkedIn</strong> jobs (needs the box above).</span>
+          </label>
+          <small style="color:var(--muted)">Greenhouse / Lever career-page forms have no login and none of this risk.</small>
+        </div>
+      </details>
 
-    <h3>Auto job discovery</h3>
-    <label class="field" style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="setAutoSearch" style="width:auto">
-      <span style="margin:0">Automatically search for new jobs every</span>
-      <input type="number" id="setAutoSearchHours" min="1" max="24" style="width:60px" value="6">
-      <span style="margin:0">hours</span>
-    </label>
-
-    <h3>🛡 Quality guardrails</h3>
-    <label class="field" style="display:flex;align-items:center;gap:8px">
-      <span style="margin:0">Auto mode only sends without review when the match is at least</span>
-      <input type="number" id="setAutoMinScore" min="0" max="95" style="width:64px" value="70">
-      <span style="margin:0">%</span>
-    </label>
-    <small style="color:var(--muted);display:block;margin:-6px 0 8px">Weaker matches still land on the board — they just wait for your review instead of being fired off blindly.</small>
-    <label class="field" style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="setFactCheck" style="width:auto" checked>
-      <span style="margin:0">Fact-check every CV &amp; email before it goes out (blocks invented skills/claims — one extra AI call per job)</span>
-    </label>
-    <label class="field" style="display:flex;align-items:center;gap:8px">
-      <span style="margin:0">Don't apply to the same company twice within</span>
-      <input type="number" id="setCooldown" min="0" max="90" style="width:64px" value="14">
-      <span style="margin:0">days</span>
-    </label>
-
-    <h3>📊 Improvement reports (auto feedback)</h3>
-    <label class="field" style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="setInsightsEnabled" style="width:auto">
-      <span style="margin:0">Analyze my results and email me improvement points every</span>
-      <input type="number" id="setInsightsEvery" min="5" max="500" style="width:64px" value="50">
-      <span style="margin:0">applications</span>
-    </label>
-    <label class="field">
-      <span>Send reports to</span>
-      <input type="email" id="setInsightsEmail" placeholder="you@gmail.com">
-      <small>Also sent after every automated run. Reports are always viewable in the app (📊 button).</small>
-    </label>
-    <label class="field" style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="setDevFeedback" style="width:auto">
-      <span style="margin:0">Share usage feedback with the JobPilot developer (off by default; every ~6 days)</span>
-    </label>
-    <small style="color:var(--muted);display:block;margin:-6px 0 8px">Off unless you tick this. Aggregate numbers only — how many jobs found/applied, which sources, error categories, costs. Never names, companies, job titles or email contents. Note: it's sent from your own Gmail, so the developer sees the address it comes from (the report body carries no personal data).</small>
-
-    <h3>Email — Gmail (sends from your name)</h3>
-    <label class="field">
-      <span>Your name (email "From")</span>
-      <input type="text" id="setFromName" placeholder="e.g. Mohammed Jawad">
-    </label>
-    <label class="field">
-      <span>Gmail address</span>
-      <input type="email" id="setSmtpUser" placeholder="you@gmail.com">
-    </label>
-    <label class="field">
-      <span>Gmail app password</span>
-      <input type="password" id="setSmtpPass" placeholder="16-character app password" autocomplete="off">
-      <small>Google Account → Security → 2-Step Verification → App passwords. Also used to read your inbox for the Sync button.</small>
-    </label>
-
-    <div class="drawer-actions">
-      <button class="btn btn-primary" id="settingsSave">Save settings</button>
-      <button class="btn btn-ghost" id="testEmailBtn">Send test email to myself</button>
-    </div>
+      <div class="drawer-actions onboard-actions">
+        <button class="btn btn-primary" id="onbStart">Start using JobPilot ✈️</button>
+        <button class="btn-link" id="onbBack">← Back</button>
+      </div>
+    </section>
   </div>
 </div>
 

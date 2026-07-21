@@ -372,6 +372,20 @@ function renderBoard() {
       refresh();
     });
   });
+  board.querySelectorAll('.card-apply').forEach(el => {
+    el.addEventListener('click', async e => {
+      e.stopPropagation(); // open the browser, not the drawer
+      el.disabled = true;
+      const orig = el.textContent;
+      el.textContent = 'Opening…';
+      try {
+        const r = await api(`/api/applications/${el.dataset.id}/autoapply`, { method: 'POST' });
+        toast(`Opened in your browser — review and click Apply.${typeof r.remainingToday === 'number' ? ` ${r.remainingToday} left in today's cap.` : ''}`);
+      } catch (err) { toast(err.message, true); }
+      el.disabled = false;
+      el.textContent = orig;
+    });
+  });
   board.querySelectorAll('.column').forEach(col => {
     col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('drag-over'); });
     col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
@@ -404,6 +418,7 @@ function cardHtml(a) {
         ${a.url ? `<a class="card-link" href="${esc(a.url)}" target="_blank" title="Open the job posting">view job ↗</a>` : ''}
         ${a.status === 'action' ? '<span class="tag warn">✋ apply on platform</span>' : ''}
         ${a.status === 'action' && a.tailored ? `<a class="card-link" href="/api/applications/${esc(a.id)}/cv.pdf" title="Download the tailored CV as PDF — upload this on the platform">CV ⬇</a>` : ''}
+        ${a.status === 'action' && a.url && state.settings?.autoApplyEnabled ? `<button class="card-apply" data-id="${esc(a.id)}" title="Open this application in your own Chrome — you review and click Apply">🖱️ Assisted apply</button>` : ''}
         ${a.recipientEmail && !a.appliedAt ? '<span class="tag done" title="Recruiter email found — applies by email automatically">@ direct</span>' : ''}
         ${a.tailored ? '<span class="tag done">CV ✓</span>' : ''}
         ${a.confirmed ? '<span class="tag done" title="Company confirmed receiving the application">rcvd ✓</span>' : ''}
@@ -854,14 +869,13 @@ applyNavState();
 
 const MODEL_HINTS = {
   groq: 'Groq defaults: llama-3.3-70b-versatile. Others: llama-3.1-8b-instant (faster).',
+  ollama: 'Ollama (local, free) default: llama3.1. Lighter: llama3.2, qwen2.5. Must be pulled first: ollama pull <model>.',
   openai: 'OpenAI defaults: gpt-4o-mini. Others: gpt-4o, gpt-4.1-mini.',
   anthropic: 'Anthropic defaults: claude-haiku-4-5-20251001 (budget). Best results: claude-sonnet-5.'
 };
 
-async function openSettings(welcome = false) {
+async function openSettings(section = null) {
   const s = await api('/api/settings');
-  $('#welcomeBox').classList.toggle('hidden', !welcome);
-  $('#settingsTitle').textContent = welcome ? 'Set up JobPilot' : 'Settings';
   $('#dataDirPath').textContent = s.dataDir;
   $('#srcRemotive').checked = s.sources.remotive;
   $('#srcLinkedin').checked = s.sources.linkedin;
@@ -887,6 +901,7 @@ async function openSettings(welcome = false) {
   $('#modelHint').textContent = MODEL_HINTS[s.provider];
   $('#setGroqKey').value = '';
   $('#setGroqKey').placeholder = s.groqKeySet ? `configured ✓ (${s.groqKeyMasked}) — paste to replace` : 'gsk_…';
+  $('#setOllamaUrl').value = s.ollamaUrl || '';
   $('#setOpenaiKey').value = '';
   $('#setOpenaiKey').placeholder = s.openaiKeySet ? `configured ✓ (${s.openaiKeyMasked}) — paste to replace` : 'sk-…';
   $('#setAnthropicKey').value = '';
@@ -897,6 +912,12 @@ async function openSettings(welcome = false) {
   $('#setAutoSearch').checked = s.autoSearch;
   $('#setAutoSearchHours').value = s.autoSearchHours;
   $('#setDailyTarget').value = s.dailyTarget;
+  $('#setAutoApplyEnabled').checked = s.autoApplyEnabled;
+  $('#setAutoApplyMode').value = s.autoApplyMode || 'assisted';
+  $('#setAutoApplyDailyCap').value = s.autoApplyDailyCap || 15;
+  $('#setAutoApplyRisk').checked = s.autoApplyRiskAccepted;
+  $('#setAutoApplyLinkedin').checked = s.autoApplyLinkedIn;
+  syncLinkedinToggle();
   $('#setInsightsEnabled').checked = s.insightsEnabled;
   $('#setInsightsEvery').value = s.insightsEvery;
   $('#setInsightsEmail').value = s.insightsEmail;
@@ -906,7 +927,47 @@ async function openSettings(welcome = false) {
   $('#setSmtpPass').value = '';
   $('#setSmtpPass').placeholder = s.smtpConfigured ? 'configured ✓ — paste to replace' : '16-character app password';
   $('#settingsOverlay').classList.remove('hidden');
+  // Reset the scroll + active nav each open, or jump to a requested section.
+  settingsGoTo(section || 'set-ai', !section);
 }
+
+// ---------- Settings left-nav: click-to-jump + scroll-spy ----------
+let settingsNavLock = 0; // a manual nav click wins over scroll-spy for a moment
+function settingsSetActive(id) {
+  document.querySelectorAll('#settingsNav .snav').forEach(b => b.classList.toggle('active', b.dataset.target === id));
+}
+function settingsGoTo(id, instant = false) {
+  const el = document.getElementById(id);
+  const scroller = $('#settingsScroll');
+  if (!el || !scroller) return;
+  settingsSetActive(id);
+  settingsNavLock = Date.now() + 700; // don't let the smooth-scroll re-highlight
+  scroller.scrollTo({ top: el.offsetTop - scroller.offsetTop - 4, behavior: instant ? 'auto' : 'smooth' });
+}
+document.querySelectorAll('#settingsNav .snav').forEach(btn => {
+  btn.addEventListener('click', () => settingsGoTo(btn.dataset.target));
+});
+// Scroll-spy: highlight the section currently in view.
+(() => {
+  const scroller = $('#settingsScroll');
+  if (!scroller || !('IntersectionObserver' in window)) return;
+  const obs = new IntersectionObserver((entries) => {
+    if (Date.now() < settingsNavLock) return; // a click just set the section
+    const vis = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+    if (vis[0]) settingsSetActive(vis[0].target.id);
+  }, { root: scroller, rootMargin: '-10% 0px -70% 0px', threshold: [0, .25, .5, 1] });
+  document.querySelectorAll('.settings-section').forEach(sec => obs.observe(sec));
+})();
+
+// LinkedIn assisted-apply can only be enabled once the risk is accepted.
+function syncLinkedinToggle() {
+  const risk = $('#setAutoApplyRisk');
+  const li = $('#setAutoApplyLinkedin');
+  if (!risk || !li) return;
+  li.disabled = !risk.checked;
+  if (!risk.checked) li.checked = false;
+}
+$('#setAutoApplyRisk')?.addEventListener('change', syncLinkedinToggle);
 
 $('#setProvider').addEventListener('change', e => { $('#modelHint').textContent = MODEL_HINTS[e.target.value]; });
 $('#settingsBtn').addEventListener('click', () => openSettings());
@@ -921,6 +982,7 @@ $('#settingsSave').addEventListener('click', async () => {
     await api('/api/settings', { method: 'POST', body: {
       provider: $('#setProvider').value,
       model: $('#setModel').value,
+      ollamaUrl: $('#setOllamaUrl').value,
       groqKey: $('#setGroqKey').value,
       openaiKey: $('#setOpenaiKey').value,
       anthropicKey: $('#setAnthropicKey').value,
@@ -933,6 +995,11 @@ $('#settingsSave').addEventListener('click', async () => {
       autoSearch: $('#setAutoSearch').checked,
       autoSearchHours: $('#setAutoSearchHours').value,
       dailyTarget: $('#setDailyTarget').value,
+      autoApplyEnabled: $('#setAutoApplyEnabled').checked,
+      autoApplyMode: $('#setAutoApplyMode').value,
+      autoApplyDailyCap: $('#setAutoApplyDailyCap').value,
+      autoApplyRiskAccepted: $('#setAutoApplyRisk').checked,
+      autoApplyLinkedIn: $('#setAutoApplyLinkedin').checked,
       insightsEnabled: $('#setInsightsEnabled').checked,
       insightsEvery: $('#setInsightsEvery').value,
       insightsEmail: $('#setInsightsEmail').value,
@@ -991,6 +1058,12 @@ $('#cvInput').addEventListener('change', async e => {
     if (!res.ok) throw new Error(data.error);
     toast(`Profile extracted — ${data.profile.skills.length} skills found`);
     $('#profileOverlay').classList.add('hidden');
+    // Reflect success inside the onboarding wizard if it's open.
+    if (!$('#onboardOverlay').classList.contains('hidden')) {
+      const st = $('#onbCvStatus');
+      st.textContent = `✓ ${file.name} added — ${data.profile.skills.length} skills found`;
+      st.classList.add('ok');
+    }
     refresh();
   } catch (err) { toast(err.message, true); }
   e.target.value = '';
@@ -1034,12 +1107,77 @@ function scheduleRefresh() {
   }, delay);
 }
 
-// First run: no data found → walk the user straight into setup
+// ---------- Onboarding wizard (first run): two short pages ----------
+const ONB_HINTS = {
+  groq: '<a href="https://console.groq.com/keys" target="_blank">Get a free key →</a> (console.groq.com/keys → Create). You can also skip and add it later.',
+  ollama: 'Runs models on <b>your own computer</b> — no key, no cost, works offline. Install from <a href="https://ollama.com" target="_blank">ollama.com</a>, then run <code>ollama pull llama3.1</code>. Pick this and you\'re set.',
+  mock: 'You\'ll see sample AI output so you can explore the whole flow. Add a real AI provider anytime in Settings.'
+};
+
+function onbShowStep(n) {
+  document.querySelectorAll('.onboard-step').forEach(s => s.classList.toggle('hidden', +s.dataset.step !== n));
+  document.querySelectorAll('.onboard-progress .dot').forEach(d => d.classList.toggle('active', +d.dataset.dot <= n));
+}
+
+function onbUpdateAiExtra() {
+  const val = document.querySelector('input[name="onbAi"]:checked')?.value || 'groq';
+  $('#onbGroqKey').classList.toggle('hidden', val !== 'groq');
+  $('#onbAiHint').innerHTML = ONB_HINTS[val];
+}
+
+function openOnboard() {
+  onbShowStep(1);
+  onbUpdateAiExtra();
+  $('#onboardOverlay').classList.remove('hidden');
+}
+function closeOnboard() { $('#onboardOverlay').classList.add('hidden'); }
+
+document.querySelectorAll('input[name="onbAi"]').forEach(r => r.addEventListener('change', onbUpdateAiExtra));
+// LinkedIn assisted-apply in onboarding also requires accepting the risk.
+$('#onbAutoApplyRisk')?.addEventListener('change', () => {
+  const li = $('#onbAutoApplyLinkedin');
+  const risk = $('#onbAutoApplyRisk');
+  if (!li || !risk) return;
+  li.disabled = !risk.checked;
+  if (!risk.checked) li.checked = false;
+});
+$('#onbNext').addEventListener('click', () => onbShowStep(2));
+$('#onbBack').addEventListener('click', () => onbShowStep(1));
+$('#onbSkip').addEventListener('click', closeOnboard);
+
+$('#onbStart').addEventListener('click', async () => {
+  const btn = $('#onbStart');
+  btn.disabled = true;
+  try {
+    const provider = document.querySelector('input[name="onbAi"]:checked')?.value || 'groq';
+    const body = {
+      // 'mock' isn't a real provider — leave provider on the default (groq) with
+      // no key so the app stays in mock mode until the user adds one.
+      provider: provider === 'mock' ? 'groq' : provider,
+      jobTitles: $('#onbTitles').value,
+      jobLocations: $('#onbLocations').value,
+      fromName: $('#onbFromName').value,
+      smtpUser: $('#onbGmail').value,
+      smtpPass: $('#onbGmailPass').value,
+      autoApplyEnabled: $('#onbAutoApply').checked,
+      autoApplyRiskAccepted: $('#onbAutoApplyRisk').checked,
+      autoApplyLinkedIn: $('#onbAutoApplyLinkedin').checked
+    };
+    if (provider === 'groq') body.groqKey = $('#onbGroqKey').value;
+    await api('/api/settings', { method: 'POST', body });
+    closeOnboard();
+    toast('You\'re all set ✈️ — click 🔍 Find jobs to start');
+    refresh();
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false;
+});
+
+// First run: no data found → walk the user straight into the wizard
 (async () => {
   await refresh();
   if (state.settings?.firstRun && !sessionStorage.getItem('jp_welcomed')) {
     sessionStorage.setItem('jp_welcomed', '1');
-    openSettings(true);
+    openOnboard();
   }
   scheduleRefresh();
 })();

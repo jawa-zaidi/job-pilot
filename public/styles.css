@@ -270,3 +270,79 @@ pre.doc { background: #0b0f14; border: 1px solid var(--border); border-radius: 1
   .stats { grid-template-columns: repeat(3, 1fr); }
   .board { grid-template-columns: repeat(6, 230px); }
 }
+
+/* ---------- Onboarding wizard ---------- */
+.modal.onboard { width: min(520px, 94vw); }
+.onboard-progress { display: flex; gap: 8px; justify-content: center; margin-bottom: 18px; }
+.onboard-progress .dot { width: 28px; height: 5px; border-radius: 3px; background: var(--border); transition: background .2s; }
+.onboard-progress .dot.active { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+.onboard-step h2 { margin-bottom: 2px; }
+.onboard-step.hidden { display: none; }
+.onboard-block { display: flex; gap: 12px; background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 12px 0; }
+.onboard-num { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; font-weight: 600; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.onboard-body { flex: 1; min-width: 0; }
+.onboard-body strong { font-size: 14px; }
+.onboard-hint { color: var(--muted); font-size: 12px; margin: 2px 0 10px; }
+.cv-drop { display: flex; align-items: center; gap: 10px; border: 1.5px dashed var(--border); border-radius: 10px; padding: 14px; cursor: pointer; color: var(--text); font-size: 13px; transition: border-color .15s, background .15s; }
+.cv-drop:hover { border-color: var(--accent); background: rgba(79,140,255,.06); }
+.cv-drop-icon { font-size: 20px; }
+.cv-drop small { color: var(--muted); }
+.onboard-status { font-size: 12px; margin-top: 8px; min-height: 0; }
+.onboard-status.ok { color: #3fb96f; }
+.ai-choices { display: flex; flex-direction: column; gap: 8px; }
+.ai-choice { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+.ai-choice:has(input:checked) { border-color: var(--accent); background: rgba(79,140,255,.08); }
+.ai-choice input { margin-top: 3px; width: auto; accent-color: var(--accent); }
+.ai-choice b { display: block; font-size: 13px; }
+.ai-choice small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+.onboard-ai-extra { margin-top: 10px; }
+.onboard-ai-extra.hidden { display: none; }
+.onboard-ai-extra input { width: 100%; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; outline: none; font-size: 13px; }
+.onboard-ai-extra input.hidden { display: none; }
+.onboard-ai-extra input:focus { border-color: var(--accent); }
+.onboard-ai-extra small { display: block; color: var(--muted); font-size: 11px; margin-top: 5px; }
+.onboard-ai-extra a, .onboard-gmail a { color: var(--accent); }
+.onboard-gmail { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0 4px; }
+.onboard-gmail summary { cursor: pointer; font-size: 13px; }
+.onboard-gmail summary small { color: var(--muted); }
+.onboard-gmail[open] { padding-bottom: 4px; }
+.onboard-gmail .field { margin-top: 10px; }
+.onboard-actions { justify-content: space-between; align-items: center; margin-top: 18px; }
+
+/* ---------- Sectioned settings (left-nav page) ---------- */
+.settings-modal { width: min(920px, 96vw); height: 88vh; max-height: 88vh; padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.settings-head { padding: 20px 26px 14px; border-bottom: 1px solid var(--border); }
+.settings-head h2 { margin: 0; }
+.settings-body { flex: 1; display: flex; min-height: 0; }
+.settings-nav { width: 210px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 14px 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; background: var(--panel); }
+.snav { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: none; color: var(--muted); font-size: 13px; padding: 9px 11px; border-radius: 9px; cursor: pointer; transition: background .12s, color .12s; }
+.snav:hover { background: var(--panel2); color: var(--text); }
+.snav.active { background: rgba(79,140,255,.14); color: var(--text); font-weight: 600; }
+.snav-ic { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+.settings-scroll { flex: 1; overflow-y: auto; padding: 22px 26px 40px; scroll-behavior: smooth; }
+.settings-section { scroll-margin-top: 8px; padding-bottom: 26px; margin-bottom: 26px; border-bottom: 1px solid var(--border); }
+.settings-section:last-child { border-bottom: none; margin-bottom: 0; }
+.settings-section h3 { margin: 0 0 2px; font-size: 16px; }
+.section-sub { color: var(--muted); font-size: 12.5px; margin: 0 0 14px; }
+.sub-head { margin: 18px 0 8px; font-size: 13.5px; }
+.sub-head small { color: var(--muted); font-weight: 400; }
+.settings-footer { flex-shrink: 0; display: flex; align-items: center; gap: 14px; padding: 14px 26px; border-top: 1px solid var(--border); background: var(--panel); }
+.settings-foot-note { color: var(--muted); font-size: 12px; }
+.toggle-row { display: flex; align-items: flex-start; gap: 8px; }
+.toggle-row input { margin-top: 2px; }
+.risk-box { background: rgba(224,101,60,.08); border: 1px solid rgba(224,101,60,.4); border-radius: 10px; padding: 14px 16px; margin-top: 10px; font-size: 13px; line-height: 1.55; }
+.risk-box p { margin: 6px 0; color: var(--text); }
+.risk-box ul { margin: 6px 0 6px 18px; color: var(--muted); }
+.risk-box li { margin: 2px 0; }
+.card-apply { background: rgba(224,101,60,.14); border: 1px solid rgba(224,101,60,.45); color: var(--text); border-radius: 7px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+.card-apply:hover { background: rgba(224,101,60,.24); }
+.card-apply:disabled { opacity: .6; cursor: default; }
+
+@media (max-width: 720px) {
+  .settings-modal { width: 96vw; height: 92vh; max-height: 92vh; }
+  .settings-body { flex-direction: column; }
+  .settings-nav { width: auto; flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 8px; gap: 6px; }
+  .snav { width: auto; white-space: nowrap; padding: 7px 10px; }
+  .snav span:not(.snav-ic) { display: none; }
+  .snav.active span:not(.snav-ic) { display: inline; }
+}
