@@ -36,7 +36,16 @@ function cfg() {
   };
 }
 
-function isLinkedIn(url) { return /(^|\.)linkedin\.com/i.test(String(url || '')); }
+function isLinkedIn(url) {
+  // Match linkedin.com and any subdomain (www., in., …), however the URL is
+  // written. Parse the host when possible; fall back to a permissive regex.
+  try {
+    const h = new URL(String(url)).hostname.toLowerCase();
+    return h === 'linkedin.com' || h.endsWith('.linkedin.com');
+  } catch {
+    return /(?:^|\/\/|\.)linkedin\.com\b/i.test(String(url || ''));
+  }
+}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function jitter() { return DEFAULTS.minDelayMs + Math.floor(Math.random() * (DEFAULTS.maxDelayMs - DEFAULTS.minDelayMs)); }
 

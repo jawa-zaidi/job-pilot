@@ -95,6 +95,19 @@ test('mock pipeline: profile extraction → scoring → tailoring runs without c
   assert.ok(tailored.cv && tailored.email_subject && tailored.email_body, 'application tailored in mock mode');
 });
 
+test('LinkedIn detection gates assisted-apply on any linkedin.com host, not lookalikes', () => {
+  const { isLinkedIn } = require('../server/autoapply');
+  // Real LinkedIn hosts — must be gated behind the risk consent.
+  assert.strictEqual(isLinkedIn('https://linkedin.com/jobs/9'), true, 'bare linkedin.com');
+  assert.strictEqual(isLinkedIn('https://www.linkedin.com/jobs/9'), true, 'www.linkedin.com');
+  assert.strictEqual(isLinkedIn('https://in.linkedin.com/jobs/9'), true, 'country subdomain');
+  // Non-LinkedIn ATS forms — no risk gate.
+  assert.strictEqual(isLinkedIn('https://boards.greenhouse.io/stripe/1'), false, 'greenhouse');
+  assert.strictEqual(isLinkedIn('https://jobs.lever.co/x'), false, 'lever');
+  // Lookalike host must NOT be treated as LinkedIn.
+  assert.strictEqual(isLinkedIn('https://linkedin.com.evil.example/x'), false, 'lookalike domain');
+});
+
 test('recruiter-email extraction prefers role/personal addresses and skips generic', () => {
   const { extractRecruiterEmail } = require('../server/jobs');
   assert.strictEqual(extractRecruiterEmail('Apply at careers@acme.com'), 'careers@acme.com');
