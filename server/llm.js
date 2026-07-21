@@ -29,16 +29,34 @@ const PROVIDERS = {
     defaultModel: 'claude-haiku-4-5-20251001',
     envKey: 'ANTHROPIC_API_KEY',
     anthropic: true // uses the Messages API shape, not the OpenAI one
+  },
+  ollama: {
+    // Local models via Ollama's OpenAI-compatible endpoint — $0 per token,
+    // fully offline, no API key. The user installs Ollama and pulls a model
+    // (e.g. `ollama pull llama3.1`); JobPilot talks to it on localhost.
+    label: 'Ollama (local, free)',
+    url: 'http://127.0.0.1:11434/v1/chat/completions',
+    defaultModel: 'llama3.1',
+    envKey: 'OLLAMA_URL',
+    local: true // no key needed; not mock mode
   }
 };
 
+const VALID_PROVIDERS = ['groq', 'openai', 'anthropic', 'ollama'];
+
 function cfg() {
   const s = load().settings || {};
-  const name = ['openai', 'anthropic'].includes(s.provider) ? s.provider : 'groq';
+  const name = VALID_PROVIDERS.includes(s.provider) ? s.provider : 'groq';
   const p = PROVIDERS[name];
   const keyBySetting = { groq: s.groqKey, openai: s.openaiKey, anthropic: s.anthropicKey };
   const key = keyBySetting[name] || process.env[p.envKey] || '';
-  return { provider: name, label: p.label, url: p.url, key, model: (s.model || '').trim() || p.defaultModel, anthropic: !!p.anthropic };
+  // Ollama's endpoint is overridable (custom host/port) via settings or env.
+  const url = p.local ? ((s.ollamaUrl || process.env.OLLAMA_URL || '').trim() || p.url) : p.url;
+  return {
+    provider: name, label: p.label, url, key,
+    model: (s.model || '').trim() || p.defaultModel,
+    anthropic: !!p.anthropic, local: !!p.local
+  };
 }
 
 // Anthropic has no JSON mode; models occasionally wrap JSON in prose or code
@@ -51,8 +69,10 @@ function extractJsonText(text) {
   return end > start ? s.slice(start, end + 1) : s;
 }
 
-function hasKey() { return !!cfg().key; }
-function providerInfo() { const c = cfg(); return { provider: c.provider, model: c.model, hasKey: !!c.key }; }
+// "Ready" (not mock mode) means either an API key is set, or the provider is a
+// local one (Ollama) that needs no key. `hasKey` keeps its name for callers.
+function hasKey() { const c = cfg(); return !!c.key || c.local; }
+function providerInfo() { const c = cfg(); return { provider: c.provider, model: c.model, hasKey: !!c.key || c.local }; }
 // Per-step instructions: 'find' (job scoring), 'cv', 'email'. Falls back to the
 // legacy single customPrompt when a step-specific one isn't set.
 function promptFor(kinds = []) {
@@ -73,7 +93,7 @@ function promptFor(kinds = []) {
 
 async function chat(messages, { json = false, maxTokens = 2048, promptKinds = null } = {}) {
   const c = cfg();
-  if (!c.key) return null;
+  if (!c.key && !c.local) return null; // no key and not a local provider → mock
   // The user's standing instructions are concatenated INTO the system prompt
   // under a highest-priority header — they override the built-in guidance.
   const custom = promptKinds ? promptFor(promptKinds) : '';
@@ -115,7 +135,8 @@ async function chat(messages, { json = false, maxTokens = 2048, promptKinds = nu
       const system = { role: 'system', content: systemText };
       res = await fetch(c.url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.key}` },
+        // Local providers (Ollama) need no Authorization header.
+        headers: { 'Content-Type': 'application/json', ...(c.key ? { Authorization: `Bearer ${c.key}` } : {}) },
         body: JSON.stringify({
           model: c.model,
           messages: [system, ...rest],
@@ -129,6 +150,10 @@ async function chat(messages, { json = false, maxTokens = 2048, promptKinds = nu
   } catch (err) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
       throw new Error(`${c.label} API timed out after ${LLM_TIMEOUT_MS / 1000}s — try again, or switch model/provider in Settings.`);
+    }
+    // Ollama not running / unreachable → a clear, actionable message.
+    if (c.local) {
+      throw new Error(`Can't reach Ollama at ${c.url}. Install it from ollama.com, then run "ollama serve" and "ollama pull ${c.model}". Or switch AI provider in Settings.`);
     }
     throw err;
   }
@@ -149,7 +174,9 @@ async function chat(messages, { json = false, maxTokens = 2048, promptKinds = nu
     const text = (data.content || []).map(b => b.text || '').join('');
     return json ? extractJsonText(text) : text;
   }
-  return data.choices[0].message.content;
+  const content = data.choices[0].message.content;
+  // Local models don't always honor response_format; pull JSON out defensively.
+  return json && c.local ? extractJsonText(content) : content;
 }
 
 async function chatJSON(messages, opts = {}) {

@@ -425,6 +425,7 @@ app.get('/api/settings', (req, res) => {
     anthropicKeySet: !!anthropicKey,
     anthropicKeyMasked: anthropicKey ? anthropicKey.slice(0, 8) + '…' + anthropicKey.slice(-4) : '',
     llmReady: info.hasKey,
+    ollamaUrl: s.ollamaUrl || '',
     smtpUser: s.smtpUser || '',
     fromName: s.fromName || '',
     smtpConfigured: email.isConfigured(),
@@ -511,7 +512,8 @@ app.post('/api/settings', (req, res) => {
   if (groqKey !== undefined && groqKey.trim()) db.settings.groqKey = groqKey.trim();
   if (openaiKey !== undefined && openaiKey.trim()) db.settings.openaiKey = openaiKey.trim();
   if (anthropicKey !== undefined && anthropicKey.trim()) db.settings.anthropicKey = anthropicKey.trim();
-  if (provider !== undefined) db.settings.provider = ['openai', 'anthropic'].includes(provider) ? provider : 'groq';
+  if (provider !== undefined) db.settings.provider = ['openai', 'anthropic', 'ollama'].includes(provider) ? provider : 'groq';
+  if (req.body.ollamaUrl !== undefined) db.settings.ollamaUrl = String(req.body.ollamaUrl).trim();
   if (model !== undefined) db.settings.model = model.trim();
   if (smtpUser !== undefined) db.settings.smtpUser = smtpUser.trim();
   if (smtpPass !== undefined && smtpPass.trim()) db.settings.smtpPass = smtpPass.replace(/\s+/g, '');

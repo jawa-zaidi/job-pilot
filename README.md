@@ -81,6 +81,7 @@ Timestamps for every apply and follow-up are stored, so schedules survive restar
 Pick one in Settings → *AI provider & model*; JobPilot uses it for scoring, CV/email tailoring, fact-checking and inbox classification. Without a key the app runs in **mock mode** (deterministic placeholder output) so you can try the flow before paying anything.
 
 - **Groq** — free tier, fast; default `llama-3.3-70b-versatile`.
+- **Ollama (local)** — **100% free, runs on your own computer, no key, works offline** (default `llama3.1`). Install from [ollama.com](https://ollama.com), run `ollama pull llama3.1`, pick *Ollama* in Settings. Best on a machine with a GPU or 16 GB+ RAM; quality is a little below the cloud models but you never pay per token. The strongest lever for keeping AI cost at $0.
 - **OpenAI (ChatGPT)** — default `gpt-4o-mini`.
 - **Anthropic (Claude)** — default `claude-haiku-4-5-20251001` (best quality/$ in the table below).
 

@@ -854,6 +854,7 @@ applyNavState();
 
 const MODEL_HINTS = {
   groq: 'Groq defaults: llama-3.3-70b-versatile. Others: llama-3.1-8b-instant (faster).',
+  ollama: 'Ollama (local, free) default: llama3.1. Lighter: llama3.2, qwen2.5. Must be pulled first: ollama pull <model>.',
   openai: 'OpenAI defaults: gpt-4o-mini. Others: gpt-4o, gpt-4.1-mini.',
   anthropic: 'Anthropic defaults: claude-haiku-4-5-20251001 (budget). Best results: claude-sonnet-5.'
 };
@@ -887,6 +888,7 @@ async function openSettings(welcome = false) {
   $('#modelHint').textContent = MODEL_HINTS[s.provider];
   $('#setGroqKey').value = '';
   $('#setGroqKey').placeholder = s.groqKeySet ? `configured ✓ (${s.groqKeyMasked}) — paste to replace` : 'gsk_…';
+  $('#setOllamaUrl').value = s.ollamaUrl || '';
   $('#setOpenaiKey').value = '';
   $('#setOpenaiKey').placeholder = s.openaiKeySet ? `configured ✓ (${s.openaiKeyMasked}) — paste to replace` : 'sk-…';
   $('#setAnthropicKey').value = '';
@@ -921,6 +923,7 @@ $('#settingsSave').addEventListener('click', async () => {
     await api('/api/settings', { method: 'POST', body: {
       provider: $('#setProvider').value,
       model: $('#setModel').value,
+      ollamaUrl: $('#setOllamaUrl').value,
       groqKey: $('#setGroqKey').value,
       openaiKey: $('#setOpenaiKey').value,
       anthropicKey: $('#setAnthropicKey').value,

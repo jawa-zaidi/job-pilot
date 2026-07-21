@@ -237,6 +237,7 @@
       <span>Provider</span>
       <select id="setProvider">
         <option value="groq">Groq (fast &amp; free tier)</option>
+        <option value="ollama">Ollama (local — 100% free, runs on your PC)</option>
         <option value="openai">OpenAI (ChatGPT)</option>
         <option value="anthropic">Anthropic (Claude)</option>
       </select>
@@ -250,6 +251,14 @@
       <span>Groq API key</span>
       <input type="password" id="setGroqKey" placeholder="gsk_…" autocomplete="off">
       <small>Free at <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent)">console.groq.com/keys</a> — create account → API Keys → Create.</small>
+    </label>
+    <label class="field">
+      <span>Ollama endpoint <small style="color:var(--muted)">(only if you picked Ollama — blank uses the default)</small></span>
+      <input type="text" id="setOllamaUrl" placeholder="http://127.0.0.1:11434/v1/chat/completions" autocomplete="off">
+      <small><strong>100% free, runs on your own computer, no key, works offline.</strong>
+      Install from <a href="https://ollama.com" target="_blank" style="color:var(--accent)">ollama.com</a>, then in a terminal run
+      <code>ollama pull llama3.1</code> (set the model name above). Best on a machine with a decent GPU or 16&nbsp;GB+ RAM;
+      quality is a bit below the cloud models but you never pay per token.</small>
     </label>
     <label class="field">
       <span>OpenAI API key</span>
