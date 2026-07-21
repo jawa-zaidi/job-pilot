@@ -372,6 +372,20 @@ function renderBoard() {
       refresh();
     });
   });
+  board.querySelectorAll('.card-apply').forEach(el => {
+    el.addEventListener('click', async e => {
+      e.stopPropagation(); // open the browser, not the drawer
+      el.disabled = true;
+      const orig = el.textContent;
+      el.textContent = 'Opening…';
+      try {
+        const r = await api(`/api/applications/${el.dataset.id}/autoapply`, { method: 'POST' });
+        toast(`Opened in your browser — review and click Apply.${typeof r.remainingToday === 'number' ? ` ${r.remainingToday} left in today's cap.` : ''}`);
+      } catch (err) { toast(err.message, true); }
+      el.disabled = false;
+      el.textContent = orig;
+    });
+  });
   board.querySelectorAll('.column').forEach(col => {
     col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('drag-over'); });
     col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
@@ -404,6 +418,7 @@ function cardHtml(a) {
         ${a.url ? `<a class="card-link" href="${esc(a.url)}" target="_blank" title="Open the job posting">view job ↗</a>` : ''}
         ${a.status === 'action' ? '<span class="tag warn">✋ apply on platform</span>' : ''}
         ${a.status === 'action' && a.tailored ? `<a class="card-link" href="/api/applications/${esc(a.id)}/cv.pdf" title="Download the tailored CV as PDF — upload this on the platform">CV ⬇</a>` : ''}
+        ${a.status === 'action' && a.url && state.settings?.autoApplyEnabled ? `<button class="card-apply" data-id="${esc(a.id)}" title="Open this application in your own Chrome — you review and click Apply">🖱️ Assisted apply</button>` : ''}
         ${a.recipientEmail && !a.appliedAt ? '<span class="tag done" title="Recruiter email found — applies by email automatically">@ direct</span>' : ''}
         ${a.tailored ? '<span class="tag done">CV ✓</span>' : ''}
         ${a.confirmed ? '<span class="tag done" title="Company confirmed receiving the application">rcvd ✓</span>' : ''}
@@ -897,6 +912,12 @@ async function openSettings(section = null) {
   $('#setAutoSearch').checked = s.autoSearch;
   $('#setAutoSearchHours').value = s.autoSearchHours;
   $('#setDailyTarget').value = s.dailyTarget;
+  $('#setAutoApplyEnabled').checked = s.autoApplyEnabled;
+  $('#setAutoApplyMode').value = s.autoApplyMode || 'assisted';
+  $('#setAutoApplyDailyCap').value = s.autoApplyDailyCap || 15;
+  $('#setAutoApplyRisk').checked = s.autoApplyRiskAccepted;
+  $('#setAutoApplyLinkedin').checked = s.autoApplyLinkedIn;
+  syncLinkedinToggle();
   $('#setInsightsEnabled').checked = s.insightsEnabled;
   $('#setInsightsEvery').value = s.insightsEvery;
   $('#setInsightsEmail').value = s.insightsEmail;
@@ -911,6 +932,7 @@ async function openSettings(section = null) {
 }
 
 // ---------- Settings left-nav: click-to-jump + scroll-spy ----------
+let settingsNavLock = 0; // a manual nav click wins over scroll-spy for a moment
 function settingsSetActive(id) {
   document.querySelectorAll('#settingsNav .snav').forEach(b => b.classList.toggle('active', b.dataset.target === id));
 }
@@ -919,6 +941,7 @@ function settingsGoTo(id, instant = false) {
   const scroller = $('#settingsScroll');
   if (!el || !scroller) return;
   settingsSetActive(id);
+  settingsNavLock = Date.now() + 700; // don't let the smooth-scroll re-highlight
   scroller.scrollTo({ top: el.offsetTop - scroller.offsetTop - 4, behavior: instant ? 'auto' : 'smooth' });
 }
 document.querySelectorAll('#settingsNav .snav').forEach(btn => {
@@ -929,11 +952,22 @@ document.querySelectorAll('#settingsNav .snav').forEach(btn => {
   const scroller = $('#settingsScroll');
   if (!scroller || !('IntersectionObserver' in window)) return;
   const obs = new IntersectionObserver((entries) => {
+    if (Date.now() < settingsNavLock) return; // a click just set the section
     const vis = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
     if (vis[0]) settingsSetActive(vis[0].target.id);
   }, { root: scroller, rootMargin: '-10% 0px -70% 0px', threshold: [0, .25, .5, 1] });
   document.querySelectorAll('.settings-section').forEach(sec => obs.observe(sec));
 })();
+
+// LinkedIn assisted-apply can only be enabled once the risk is accepted.
+function syncLinkedinToggle() {
+  const risk = $('#setAutoApplyRisk');
+  const li = $('#setAutoApplyLinkedin');
+  if (!risk || !li) return;
+  li.disabled = !risk.checked;
+  if (!risk.checked) li.checked = false;
+}
+$('#setAutoApplyRisk')?.addEventListener('change', syncLinkedinToggle);
 
 $('#setProvider').addEventListener('change', e => { $('#modelHint').textContent = MODEL_HINTS[e.target.value]; });
 $('#settingsBtn').addEventListener('click', () => openSettings());
@@ -961,6 +995,11 @@ $('#settingsSave').addEventListener('click', async () => {
       autoSearch: $('#setAutoSearch').checked,
       autoSearchHours: $('#setAutoSearchHours').value,
       dailyTarget: $('#setDailyTarget').value,
+      autoApplyEnabled: $('#setAutoApplyEnabled').checked,
+      autoApplyMode: $('#setAutoApplyMode').value,
+      autoApplyDailyCap: $('#setAutoApplyDailyCap').value,
+      autoApplyRiskAccepted: $('#setAutoApplyRisk').checked,
+      autoApplyLinkedIn: $('#setAutoApplyLinkedin').checked,
       insightsEnabled: $('#setInsightsEnabled').checked,
       insightsEvery: $('#setInsightsEvery').value,
       insightsEmail: $('#setInsightsEmail').value,
@@ -1094,6 +1133,14 @@ function openOnboard() {
 function closeOnboard() { $('#onboardOverlay').classList.add('hidden'); }
 
 document.querySelectorAll('input[name="onbAi"]').forEach(r => r.addEventListener('change', onbUpdateAiExtra));
+// LinkedIn assisted-apply in onboarding also requires accepting the risk.
+$('#onbAutoApplyRisk')?.addEventListener('change', () => {
+  const li = $('#onbAutoApplyLinkedin');
+  const risk = $('#onbAutoApplyRisk');
+  if (!li || !risk) return;
+  li.disabled = !risk.checked;
+  if (!risk.checked) li.checked = false;
+});
 $('#onbNext').addEventListener('click', () => onbShowStep(2));
 $('#onbBack').addEventListener('click', () => onbShowStep(1));
 $('#onbSkip').addEventListener('click', closeOnboard);
@@ -1111,7 +1158,10 @@ $('#onbStart').addEventListener('click', async () => {
       jobLocations: $('#onbLocations').value,
       fromName: $('#onbFromName').value,
       smtpUser: $('#onbGmail').value,
-      smtpPass: $('#onbGmailPass').value
+      smtpPass: $('#onbGmailPass').value,
+      autoApplyEnabled: $('#onbAutoApply').checked,
+      autoApplyRiskAccepted: $('#onbAutoApplyRisk').checked,
+      autoApplyLinkedIn: $('#onbAutoApplyLinkedin').checked
     };
     if (provider === 'groq') body.groqKey = $('#onbGroqKey').value;
     await api('/api/settings', { method: 'POST', body });

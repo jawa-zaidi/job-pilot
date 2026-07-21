@@ -136,6 +136,7 @@
         <button type="button" class="snav" data-target="set-sources"><span class="snav-ic">🔍</span><span>Job source APIs</span></button>
         <button type="button" class="snav" data-target="set-prefs"><span class="snav-ic">🎯</span><span>Job preferences</span></button>
         <button type="button" class="snav" data-target="set-auto"><span class="snav-ic">⚙️</span><span>Automation &amp; quality</span></button>
+        <button type="button" class="snav" data-target="set-apply"><span class="snav-ic">🖱️</span><span>Browser auto-apply</span></button>
         <button type="button" class="snav" data-target="set-prompts"><span class="snav-ic">✍️</span><span>AI instructions</span></button>
         <button type="button" class="snav" data-target="set-email"><span class="snav-ic">✉️</span><span>Email (Gmail)</span></button>
         <button type="button" class="snav" data-target="set-reports"><span class="snav-ic">📊</span><span>Reports &amp; privacy</span></button>
@@ -306,6 +307,52 @@
           </label>
         </section>
 
+        <section class="settings-section" id="set-apply">
+          <h3>🖱️ Browser auto-apply</h3>
+          <p class="section-sub">Opens a job's application page in <strong>your own Chrome</strong>, so you're logged in as yourself and the tailored CV is ready — then <strong>you click Apply</strong>. JobPilot never submits for you.</p>
+
+          <label class="field toggle-row">
+            <input type="checkbox" id="setAutoApplyEnabled" style="width:auto">
+            <span style="margin:0"><strong>Enable browser assisted-apply</strong> — a "🖱️ Assisted apply" button appears on <em>Your action ✋</em> cards.</span>
+          </label>
+
+          <label class="field">
+            <span>Mode</span>
+            <select id="setAutoApplyMode">
+              <option value="assisted">Assisted — just open the page, I fill &amp; click (safest, recommended)</option>
+              <option value="autofill">Auto-fill — pre-fill name/email on Greenhouse/Lever forms, I review &amp; submit</option>
+            </select>
+            <small>Auto-fill only touches simple ATS forms; LinkedIn always stays fully manual.</small>
+          </label>
+
+          <label class="field" style="display:flex;align-items:center;gap:8px">
+            <span style="margin:0">Daily cap — never open more than</span>
+            <input type="number" id="setAutoApplyDailyCap" min="1" max="100" style="width:64px" value="15">
+            <span style="margin:0">applications a day</span>
+          </label>
+          <small style="color:var(--muted);display:block;margin:-6px 0 10px">Deliberately conservative. Sudden spikes in activity are the main thing that gets accounts flagged.</small>
+
+          <div class="risk-box">
+            <strong>⚠️ LinkedIn Easy Apply — read this</strong>
+            <p>LinkedIn's Terms <strong>forbid automation</strong>. Even careful use carries real risk:</p>
+            <ul>
+              <li>Temporary <strong>action blocks</strong> (can't apply/connect for hours–days)</li>
+              <li>A permanent <strong>account restriction or ban</strong></li>
+              <li>Loss of your network, messages and history on that account</li>
+            </ul>
+            <p>JobPilot lowers the risk by using your <strong>real logged-in Chrome</strong> (no bot login), never running headless, pacing actions with human-like delays and the daily cap, and leaving the final click to you — but it <strong>cannot eliminate</strong> the risk.</p>
+            <label class="field toggle-row" style="margin-top:8px">
+              <input type="checkbox" id="setAutoApplyRisk" style="width:auto">
+              <span style="margin:0">I understand and <strong>accept the risk</strong> that automating LinkedIn may get my account restricted or banned.</span>
+            </label>
+            <label class="field toggle-row">
+              <input type="checkbox" id="setAutoApplyLinkedin" style="width:auto">
+              <span style="margin:0">Enable assisted-apply on <strong>LinkedIn</strong> jobs too (requires accepting the risk above).</span>
+            </label>
+            <small style="color:var(--muted)">Greenhouse, Lever and other company career-page forms have no login and carry none of this risk — they work with just the toggle at the top.</small>
+          </div>
+        </section>
+
         <section class="settings-section" id="set-prompts">
           <h3>✍️ Custom AI instructions</h3>
           <p class="section-sub">One set of rules per step. Feedback you save on the dashboard lands in the step you pick there.</p>
@@ -468,6 +515,27 @@
           <input type="password" id="onbGmailPass" placeholder="16-character app password" autocomplete="off">
           <small>Google Account → Security → 2-Step Verification → App passwords.</small>
         </label>
+      </details>
+
+      <details class="onboard-gmail">
+        <summary>🖱️ Browser assisted-apply <small>(optional — apply on the platform in your own Chrome)</small></summary>
+        <label class="field toggle-row" style="margin-top:10px">
+          <input type="checkbox" id="onbAutoApply" style="width:auto">
+          <span style="margin:0">Show a "Assisted apply" button on jobs you apply to yourself — it opens the page in <strong>your Chrome</strong>; <strong>you</strong> click Apply. JobPilot never submits for you.</span>
+        </label>
+        <div class="risk-box" style="margin-top:6px">
+          <strong>⚠️ LinkedIn is riskier</strong>
+          <p>LinkedIn's Terms forbid automation — using it can lead to an <strong>action block or a permanent account ban</strong>. We reduce the risk (your real logged-in Chrome, no bot login, human-like pacing, you click Apply) but can't remove it.</p>
+          <label class="field toggle-row">
+            <input type="checkbox" id="onbAutoApplyRisk" style="width:auto">
+            <span style="margin:0">I <strong>accept the risk</strong> of LinkedIn restricting or banning my account.</span>
+          </label>
+          <label class="field toggle-row">
+            <input type="checkbox" id="onbAutoApplyLinkedin" style="width:auto">
+            <span style="margin:0">Also enable it on <strong>LinkedIn</strong> jobs (needs the box above).</span>
+          </label>
+          <small style="color:var(--muted)">Greenhouse / Lever career-page forms have no login and none of this risk.</small>
+        </div>
       </details>
 
       <div class="drawer-actions onboard-actions">

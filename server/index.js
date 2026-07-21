@@ -324,6 +324,21 @@ app.delete('/api/applications/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Open this job's application page in the user's own Chrome (assisted apply).
+// Never submits — the human clicks Apply. See server/autoapply.js for the
+// safety model (real logged-in session, human-gated, paced, LinkedIn gated).
+app.post('/api/applications/:id/autoapply', async (req, res) => {
+  try {
+    const db = load();
+    const a = db.applications.find(x => x.id === req.params.id);
+    if (!a) return res.status(404).json({ error: 'Not found' });
+    const result = await require('./autoapply').apply(a);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/applications/:id/tailor', async (req, res) => {
   try {
     const db = load();
@@ -426,6 +441,11 @@ app.get('/api/settings', (req, res) => {
     anthropicKeyMasked: anthropicKey ? anthropicKey.slice(0, 8) + '…' + anthropicKey.slice(-4) : '',
     llmReady: info.hasKey,
     ollamaUrl: s.ollamaUrl || '',
+    autoApplyEnabled: !!s.autoApplyEnabled,
+    autoApplyLinkedIn: !!s.autoApplyLinkedIn,
+    autoApplyRiskAccepted: !!s.autoApplyRiskAccepted,
+    autoApplyMode: s.autoApplyMode === 'autofill' ? 'autofill' : 'assisted',
+    autoApplyDailyCap: s.autoApplyDailyCap || 15,
     smtpUser: s.smtpUser || '',
     fromName: s.fromName || '',
     smtpConfigured: email.isConfigured(),
@@ -514,6 +534,15 @@ app.post('/api/settings', (req, res) => {
   if (anthropicKey !== undefined && anthropicKey.trim()) db.settings.anthropicKey = anthropicKey.trim();
   if (provider !== undefined) db.settings.provider = ['openai', 'anthropic', 'ollama'].includes(provider) ? provider : 'groq';
   if (req.body.ollamaUrl !== undefined) db.settings.ollamaUrl = String(req.body.ollamaUrl).trim();
+  // Browser assisted-apply
+  if (req.body.autoApplyEnabled !== undefined) db.settings.autoApplyEnabled = !!req.body.autoApplyEnabled;
+  if (req.body.autoApplyRiskAccepted !== undefined) db.settings.autoApplyRiskAccepted = !!req.body.autoApplyRiskAccepted;
+  // LinkedIn assisted-apply can only be on if the risk was explicitly accepted.
+  if (req.body.autoApplyLinkedIn !== undefined) {
+    db.settings.autoApplyLinkedIn = !!req.body.autoApplyLinkedIn && !!(req.body.autoApplyRiskAccepted ?? db.settings.autoApplyRiskAccepted);
+  }
+  if (req.body.autoApplyMode !== undefined) db.settings.autoApplyMode = req.body.autoApplyMode === 'autofill' ? 'autofill' : 'assisted';
+  if (req.body.autoApplyDailyCap !== undefined) db.settings.autoApplyDailyCap = Math.max(1, Math.min(100, Number(req.body.autoApplyDailyCap) || 15));
   if (model !== undefined) db.settings.model = model.trim();
   if (smtpUser !== undefined) db.settings.smtpUser = smtpUser.trim();
   if (smtpPass !== undefined && smtpPass.trim()) db.settings.smtpPass = smtpPass.replace(/\s+/g, '');
