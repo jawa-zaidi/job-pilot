@@ -2,7 +2,7 @@
   "name": "jobpilot",
   "version": "0.1.0",
   "description": "JobPilot — automated job search, tailored CV & email generation, application tracking with auto follow-ups",
-  "main": "server/index.js",
+  "main": "electron/main.js",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,10 +11,67 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "make-icon": "node build/make-icon.js",
+    "app": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.jobpilot.app",
+    "productName": "JobPilot",
+    "asar": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**",
+      "server/**",
+      "public/**",
+      "build/icon.png",
+      "package.json",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "JobPilot"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png",
+      "category": "Office"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "jawa-zaidi",
+        "repo": "job-pilot"
+      }
+    ]
   },
   "dependencies": {
     "dotenv": "^16.4.5",
+    "electron-updater": "^6.3.9",
     "express": "^4.19.2",
     "imapflow": "^1.4.3",
     "mailparser": "^3.9.14",
@@ -23,5 +80,9 @@
     "nodemailer": "^9.0.3",
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.19.1"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   }
 }
