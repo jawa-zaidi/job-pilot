@@ -859,10 +859,8 @@ const MODEL_HINTS = {
   anthropic: 'Anthropic defaults: claude-haiku-4-5-20251001 (budget). Best results: claude-sonnet-5.'
 };
 
-async function openSettings(welcome = false) {
+async function openSettings(section = null) {
   const s = await api('/api/settings');
-  $('#welcomeBox').classList.toggle('hidden', !welcome);
-  $('#settingsTitle').textContent = welcome ? 'Set up JobPilot' : 'Settings';
   $('#dataDirPath').textContent = s.dataDir;
   $('#srcRemotive').checked = s.sources.remotive;
   $('#srcLinkedin').checked = s.sources.linkedin;
@@ -908,7 +906,34 @@ async function openSettings(welcome = false) {
   $('#setSmtpPass').value = '';
   $('#setSmtpPass').placeholder = s.smtpConfigured ? 'configured ✓ — paste to replace' : '16-character app password';
   $('#settingsOverlay').classList.remove('hidden');
+  // Reset the scroll + active nav each open, or jump to a requested section.
+  settingsGoTo(section || 'set-ai', !section);
 }
+
+// ---------- Settings left-nav: click-to-jump + scroll-spy ----------
+function settingsSetActive(id) {
+  document.querySelectorAll('#settingsNav .snav').forEach(b => b.classList.toggle('active', b.dataset.target === id));
+}
+function settingsGoTo(id, instant = false) {
+  const el = document.getElementById(id);
+  const scroller = $('#settingsScroll');
+  if (!el || !scroller) return;
+  settingsSetActive(id);
+  scroller.scrollTo({ top: el.offsetTop - scroller.offsetTop - 4, behavior: instant ? 'auto' : 'smooth' });
+}
+document.querySelectorAll('#settingsNav .snav').forEach(btn => {
+  btn.addEventListener('click', () => settingsGoTo(btn.dataset.target));
+});
+// Scroll-spy: highlight the section currently in view.
+(() => {
+  const scroller = $('#settingsScroll');
+  if (!scroller || !('IntersectionObserver' in window)) return;
+  const obs = new IntersectionObserver((entries) => {
+    const vis = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+    if (vis[0]) settingsSetActive(vis[0].target.id);
+  }, { root: scroller, rootMargin: '-10% 0px -70% 0px', threshold: [0, .25, .5, 1] });
+  document.querySelectorAll('.settings-section').forEach(sec => obs.observe(sec));
+})();
 
 $('#setProvider').addEventListener('change', e => { $('#modelHint').textContent = MODEL_HINTS[e.target.value]; });
 $('#settingsBtn').addEventListener('click', () => openSettings());

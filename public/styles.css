@@ -308,3 +308,32 @@ pre.doc { background: #0b0f14; border: 1px solid var(--border); border-radius: 1
 .onboard-gmail[open] { padding-bottom: 4px; }
 .onboard-gmail .field { margin-top: 10px; }
 .onboard-actions { justify-content: space-between; align-items: center; margin-top: 18px; }
+
+/* ---------- Sectioned settings (left-nav page) ---------- */
+.settings-modal { width: min(920px, 96vw); height: 88vh; max-height: 88vh; padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.settings-head { padding: 20px 26px 14px; border-bottom: 1px solid var(--border); }
+.settings-head h2 { margin: 0; }
+.settings-body { flex: 1; display: flex; min-height: 0; }
+.settings-nav { width: 210px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 14px 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; background: var(--panel); }
+.snav { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: none; color: var(--muted); font-size: 13px; padding: 9px 11px; border-radius: 9px; cursor: pointer; transition: background .12s, color .12s; }
+.snav:hover { background: var(--panel2); color: var(--text); }
+.snav.active { background: rgba(79,140,255,.14); color: var(--text); font-weight: 600; }
+.snav-ic { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+.settings-scroll { flex: 1; overflow-y: auto; padding: 22px 26px 40px; scroll-behavior: smooth; }
+.settings-section { scroll-margin-top: 8px; padding-bottom: 26px; margin-bottom: 26px; border-bottom: 1px solid var(--border); }
+.settings-section:last-child { border-bottom: none; margin-bottom: 0; }
+.settings-section h3 { margin: 0 0 2px; font-size: 16px; }
+.section-sub { color: var(--muted); font-size: 12.5px; margin: 0 0 14px; }
+.sub-head { margin: 18px 0 8px; font-size: 13.5px; }
+.sub-head small { color: var(--muted); font-weight: 400; }
+.settings-footer { flex-shrink: 0; display: flex; align-items: center; gap: 14px; padding: 14px 26px; border-top: 1px solid var(--border); background: var(--panel); }
+.settings-foot-note { color: var(--muted); font-size: 12px; }
+
+@media (max-width: 720px) {
+  .settings-modal { width: 96vw; height: 92vh; max-height: 92vh; }
+  .settings-body { flex-direction: column; }
+  .settings-nav { width: auto; flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 8px; gap: 6px; }
+  .snav { width: auto; white-space: nowrap; padding: 7px 10px; }
+  .snav span:not(.snav-ic) { display: none; }
+  .snav.active span:not(.snav-ic) { display: inline; }
+}
