@@ -10,11 +10,12 @@ Job application autopilot: find best-fit jobs → tailored ATS CV + email per jo
 
 ### Option A — Download the app (easiest, no terminal) ✨
 
-For non-technical users on **Windows / macOS**:
+For non-technical users on **Windows / macOS** — grab the [**latest release**](https://github.com/jawa-zaidi/job-pilot/releases/latest):
 
-1. Go to the [**Releases**](https://github.com/jawa-zaidi/job-pilot/releases) page.
-2. Download **`JobPilot-Setup.exe`** (Windows) or **`JobPilot.dmg`** (macOS).
-3. Double-click it, install, and launch JobPilot from your **Desktop / Start Menu** like any normal app.
+- **Windows:** download [`JobPilot-Setup-0.1.0.exe`](https://github.com/jawa-zaidi/job-pilot/releases/latest) → double-click → install.
+- **macOS (Apple Silicon *and* Intel):** download [`JobPilot-0.1.0-universal.dmg`](https://github.com/jawa-zaidi/job-pilot/releases/latest) → open → drag JobPilot to Applications.
+
+Then launch JobPilot from your **Desktop / Start Menu / Applications** like any normal app.
 
 No Node.js, no git, no terminal, no `localhost` URL to remember. The app opens in
 its own window with all your data, keeps running quietly in the **system tray** so
