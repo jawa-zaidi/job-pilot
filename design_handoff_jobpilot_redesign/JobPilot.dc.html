@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/organic-d3b648a1-a5fb-42d1-b237-5baaef312ae1/styles.css">
+<script src="_ds/organic-d3b648a1-a5fb-42d1-b237-5baaef312ae1/_ds_bundle.js"></script>
+<style>
+  a { color: var(--color-accent); }
+  a:hover { color: var(--color-accent-700); }
+  .jp-scroll::-webkit-scrollbar { height: 10px; width: 10px; }
+  .jp-scroll::-webkit-scrollbar-thumb { background: var(--color-neutral-300); border-radius: 999px; }
+  @keyframes jp-spin { to { transform: rotate(360deg); } }
+</style>
+</helmet>
+
+<div style="display:flex; min-height:100vh; background:var(--color-bg); color:var(--color-text); font-family:var(--font-body)">
+
+  <!-- ══════════ SIDEBAR ══════════ -->
+  <aside style="width:284px; flex-shrink:0; background:var(--color-neutral-100); border-right:1px solid var(--color-divider); padding:24px 20px; display:flex; flex-direction:column; gap:26px; position:sticky; top:0; height:100vh; overflow-y:auto">
+
+    <div style="display:flex; align-items:center; gap:10px">
+      <span style="width:40px; height:40px; border-radius:50%; background:var(--color-accent); display:grid; place-items:center; box-shadow:var(--shadow-sm)">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-bg)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>
+      </span>
+      <div>
+        <div style="font-family:var(--font-heading); font-size:22px; line-height:1">JobPilot</div>
+        <div style="font-size:11px; color:var(--color-accent-700); letter-spacing:.04em; margin-top:2px">Application autopilot</div>
+      </div>
+    </div>
+
+    <!-- Profile -->
+    <div>
+      <h6 style="margin:0 0 8px; color:var(--color-neutral-600)">Profile</h6>
+      <button style="width:100%; text-align:left; background:var(--color-surface); border:1px solid var(--color-divider); border-radius:999px; padding:9px 14px; font:inherit; font-size:13px; display:flex; align-items:center; justify-content:space-between; cursor:pointer; margin-bottom:10px">
+        <span>Mohammed Jawad — Backend Eng</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+
+      <sc-if value="{{ populated }}" hint-placeholder-val="{{ true }}">
+        <div style="background:var(--color-surface); border-radius:var(--radius-md); padding:14px; box-shadow:var(--shadow-sm)">
+          <div style="font-weight:700; font-size:15px">Mohammed Jawad</div>
+          <div style="color:var(--color-neutral-600); font-size:12.5px; margin-bottom:10px">Backend Engineer · 6 yrs</div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px">
+            <sc-for list="{{ skills }}" as="s" hint-placeholder-count="6">
+              <span class="tag tag-accent-2" style="font-size:10.5px">{{ s }}</span>
+            </sc-for>
+          </div>
+          <div style="display:flex; gap:14px; margin-top:12px">
+            <button onClick="{{ openProfile }}" style="background:none; border:none; color:var(--color-accent-700); font:inherit; font-size:12px; cursor:pointer; padding:0; text-decoration:underline">Edit profile</button>
+            <button style="background:none; border:none; color:var(--color-accent-700); font:inherit; font-size:12px; cursor:pointer; padding:0; text-decoration:underline">Re-upload CV</button>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ empty }}" hint-placeholder-val="{{ true }}">
+        <div style="background:var(--color-accent-100); border:1px solid var(--color-accent-200); border-radius:var(--radius-md); padding:14px">
+          <p style="font-size:12.5px; color:var(--color-accent-800); margin:0 0 12px; line-height:1.5">Upload your CV once — JobPilot extracts your skills and tailors every application.</p>
+          <button class="btn btn-primary btn-block" style="margin:0">Upload CV</button>
+        </div>
+      </sc-if>
+    </div>
+
+    <!-- Manual search -->
+    <div>
+      <h6 style="margin:0 0 8px; color:var(--color-neutral-600)">Find jobs manually</h6>
+      <div style="display:flex; gap:8px">
+        <input class="input" placeholder="e.g. frontend engineer" style="flex:1; min-width:0">
+        <button class="btn btn-primary" style="flex-shrink:0">Search</button>
+      </div>
+      <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px">
+        <sc-for list="{{ sources }}" as="src" hint-placeholder-count="5">
+          <div style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--color-neutral-700)">
+            <span style="width:8px; height:8px; border-radius:50%; background:{{ src.dot }}"></span>
+            <span>{{ src.name }}</span>
+            <span style="margin-left:auto; font-size:10.5px; color:var(--color-neutral-500)">{{ src.note }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- Tools -->
+    <div style="display:flex; flex-direction:column; gap:8px">
+      <button onClick="{{ openReports }}" class="btn btn-secondary btn-block" style="margin:0; justify-content:flex-start; gap:9px">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+        Improvement report
+      </button>
+      <button onClick="{{ openSettings }}" class="btn btn-secondary btn-block" style="margin:0; justify-content:flex-start; gap:9px">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        Settings &amp; API keys
+      </button>
+      <div style="font-size:11.5px; color:var(--color-accent-2-700); margin-top:2px; display:flex; align-items:center; gap:6px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        Email: sending as Mohammed Jawad
+      </div>
+    </div>
+
+    <div style="margin-top:auto; display:flex; align-items:center; justify-content:space-between; padding-top:14px; border-top:1px solid var(--color-divider)">
+      <span class="tag tag-accent-2" style="font-size:10px">AI: Claude Haiku</span>
+      <button style="background:none; border:none; color:var(--color-neutral-500); font:inherit; font-size:11.5px; cursor:pointer; text-decoration:underline">Reset profile</button>
+    </div>
+  </aside>
+
+  <!-- ══════════ MAIN ══════════ -->
+  <main style="flex:1; padding:26px 30px; min-width:0">
+
+    <!-- Topbar -->
+    <header style="display:flex; align-items:center; justify-content:space-between; margin-bottom:22px">
+      <div>
+        <h1 style="font-size:34px; margin:0">Dashboard</h1>
+        <p style="margin:2px 0 0; color:var(--color-neutral-600); font-size:13.5px">Your applications, from discovery to interview.</p>
+      </div>
+      <div class="seg" style="background:var(--color-neutral-100)">
+        <label class="seg-opt"><input type="radio" name="demo" checked="{{ isPopulated }}" onChange="{{ setPopulated }}">Sample data</label>
+        <label class="seg-opt"><input type="radio" name="demo" checked="{{ isEmpty }}" onChange="{{ setEmptyState }}">First run</label>
+      </div>
+    </header>
+
+    <!-- ─── POPULATED ─── -->
+    <sc-if value="{{ populated }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <!-- Stats -->
+        <section style="display:grid; grid-template-columns:repeat(5, 1fr) 1.5fr; gap:14px; margin-bottom:22px">
+          <sc-for list="{{ stats }}" as="st" hint-placeholder-count="5">
+            <div style="background:var(--color-surface); border-radius:var(--radius-md); padding:16px 18px; box-shadow:var(--shadow-sm)">
+              <div style="font-size:30px; font-family:var(--font-heading); line-height:1; color:{{ st.color }}">{{ st.num }}</div>
+              <div style="font-size:11.5px; color:var(--color-neutral-600); margin-top:6px">{{ st.label }}</div>
+            </div>
+          </sc-for>
+          <div style="background:var(--color-surface); border-radius:var(--radius-md); padding:14px 18px; box-shadow:var(--shadow-sm)">
+            <div style="display:flex; align-items:flex-end; gap:5px; height:36px; margin-bottom:8px">
+              <sc-for list="{{ funnel }}" as="b" hint-placeholder-count="9">
+                <div title="{{ b.label }}" style="flex:1; border-radius:4px 4px 0 0; min-height:3px; background:{{ b.color }}; height:{{ b.h }}"></div>
+              </sc-for>
+            </div>
+            <div style="font-size:11.5px; color:var(--color-neutral-600)">Pipeline</div>
+          </div>
+        </section>
+
+        <!-- Flight plan — the two-button flow, made legible -->
+        <section style="background:var(--color-neutral-100); border-radius:var(--radius-lg); padding:20px 22px; margin-bottom:16px; box-shadow:var(--shadow-sm)">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px">
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap">
+              <sc-for list="{{ flightSteps }}" as="fs" hint-placeholder-count="3">
+                <div style="display:flex; align-items:center; gap:10px; padding:8px 14px; border-radius:999px; background:{{ fs.bg }}; border:1px solid {{ fs.border }}">
+                  <span style="width:24px; height:24px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:700; background:{{ fs.dotBg }}; color:{{ fs.dotFg }}">{{ fs.n }}</span>
+                  <div>
+                    <div style="font-size:13px; font-weight:700; color:{{ fs.titleColor }}">{{ fs.title }}</div>
+                    <div style="font-size:11px; color:var(--color-neutral-600)">{{ fs.sub }}</div>
+                  </div>
+                </div>
+                <span style="color:var(--color-neutral-400)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                </span>
+              </sc-for>
+              <span style="font-size:11px; color:var(--color-neutral-500); align-self:center">then repeats ↻</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:18px">
+            <button class="btn" style="background:var(--color-accent-2-600); color:var(--color-bg); font-size:15px; padding:13px 26px; gap:8px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="13" x="6" y="4" rx="2"/><path d="m6 8 6 4 6-4"/></svg>
+              Email 2 applications
+            </button>
+            <button class="btn btn-secondary" style="font-size:14px; padding:13px 22px; gap:8px">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+              Sync — follow-ups &amp; inbox
+            </button>
+            <div style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--color-neutral-600)">
+              <span>Mode</span>
+              <div class="seg" style="background:var(--color-surface)">
+                <label class="seg-opt" style="padding:6px 12px"><input type="radio" name="mode" checked>Manual</label>
+                <label class="seg-opt" style="padding:6px 12px"><input type="radio" name="mode">Auto</label>
+              </div>
+            </div>
+            <div style="margin-left:auto; text-align:right; font-size:12px; color:var(--color-neutral-600); line-height:1.4">
+              <span style="color:var(--color-accent-2-700)">last send: $0.04</span> ·
+              API cost so far: <b style="color:var(--color-text)">$1.18</b>
+            </div>
+          </div>
+        </section>
+
+        <!-- Teach the AI -->
+        <div style="display:flex; gap:10px; margin-bottom:16px; align-items:center; background:var(--color-accent-100); border-radius:999px; padding:6px 8px 6px 16px">
+          <span style="font-size:12.5px; color:var(--color-accent-800); font-weight:700; white-space:nowrap; display:flex; align-items:center; gap:6px">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
+            Teach the AI
+          </span>
+          <select style="background:var(--color-surface); border:1px solid var(--color-divider); border-radius:999px; padding:7px 12px; font:inherit; font-size:12.5px; color:var(--color-text)">
+            <option>✉️ Email</option><option>📄 CV</option><option>🔍 Finding jobs</option>
+          </select>
+          <input placeholder='e.g. "avoid agency jobs", "make emails shorter"' style="flex:1; min-width:0; background:var(--color-surface); border:1px solid var(--color-divider); border-radius:999px; padding:8px 14px; font:inherit; font-size:12.5px; color:var(--color-text)">
+          <button class="btn btn-primary" style="flex-shrink:0">Save instruction</button>
+        </div>
+
+        <!-- Filters -->
+        <section style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; font-size:12.5px; color:var(--color-neutral-600)">
+          <select style="background:var(--color-surface); border:1px solid var(--color-divider); border-radius:999px; padding:7px 14px; font:inherit; font-size:12.5px; color:var(--color-text)">
+            <option>All stages</option><option>Fresh applied</option><option>Got reply ⭐</option><option>Interview in process</option>
+          </select>
+          <label style="display:flex; align-items:center; gap:6px">Applied from <input type="date" style="background:var(--color-surface); border:1px solid var(--color-divider); border-radius:999px; padding:6px 12px; font:inherit; font-size:12.5px; color:var(--color-text)"></label>
+          <label style="display:flex; align-items:center; gap:6px">to <input type="date" style="background:var(--color-surface); border:1px solid var(--color-divider); border-radius:999px; padding:6px 12px; font:inherit; font-size:12.5px; color:var(--color-text)"></label>
+          <button style="background:none; border:none; color:var(--color-accent-700); font:inherit; font-size:12px; cursor:pointer; text-decoration:underline">Clear filters</button>
+        </section>
+
+        <!-- Kanban board -->
+        <section class="jp-scroll" style="display:flex; gap:14px; overflow-x:auto; padding-bottom:10px">
+          <sc-for list="{{ columns }}" as="col" hint-placeholder-count="9">
+            <div style="min-width:224px; flex:1 0 224px; background:var(--color-neutral-100); border-radius:var(--radius-md); padding:12px; min-height:260px; display:flex; flex-direction:column; box-shadow:var(--shadow-sm)">
+              <div style="display:flex; align-items:center; gap:8px; padding:2px 4px 12px; font-size:13px; font-weight:700">
+                <span style="width:9px; height:9px; border-radius:50%; background:{{ col.color }}"></span>
+                {{ col.label }}
+                <span style="margin-left:auto; background:var(--color-surface); border-radius:999px; padding:1px 9px; font-size:11px; color:var(--color-neutral-600)">{{ col.count }}</span>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:9px; flex:1">
+                <sc-for list="{{ col.cards }}" as="c" hint-placeholder-count="2">
+                  <div onClick="{{ c.open }}" style="background:var(--color-surface); border:1px solid transparent; border-radius:var(--radius-md); padding:12px; cursor:pointer; box-shadow:var(--shadow-sm)" style-hover="border-color:var(--color-accent); box-shadow:var(--shadow-md)">
+                    <div style="font-weight:700; font-size:13px; line-height:1.3">{{ c.title }}</div>
+                    <div style="color:var(--color-neutral-600); font-size:12px; margin-top:2px">{{ c.company }}</div>
+                    <div style="display:flex; align-items:center; gap:6px; margin-top:9px; flex-wrap:wrap">
+                      <span style="font-size:11px; font-weight:700; border-radius:999px; padding:2px 9px; background:{{ c.scoreBg }}; color:{{ c.scoreFg }}">{{ c.score }}</span>
+                      <sc-for list="{{ c.badges }}" as="bd" hint-placeholder-count="1">
+                        <span style="font-size:10px; border-radius:999px; padding:2px 8px; background:{{ bd.bg }}; color:{{ bd.fg }}">{{ bd.text }}</span>
+                      </sc-for>
+                      <sc-if value="{{ c.applied }}" hint-placeholder-val="{{ true }}">
+                        <span style="display:flex; gap:3px; margin-left:auto">
+                          <sc-for list="{{ c.pips }}" as="p" hint-placeholder-count="3">
+                            <span style="width:7px; height:7px; border-radius:50%; background:{{ p.color }}"></span>
+                          </sc-for>
+                        </span>
+                      </sc-if>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </section>
+
+        <!-- Run log + Activity -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:26px">
+          <section>
+            <h4 style="font-size:18px; margin:0 0 12px">Run log</h4>
+            <ul style="list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px">
+              <sc-for list="{{ runs }}" as="r" hint-placeholder-count="3">
+                <li style="background:var(--color-surface); border-radius:var(--radius-sm); padding:10px 14px; font-size:12.5px; display:flex; gap:10px">
+                  <span style="color:var(--color-neutral-500); white-space:nowrap">{{ r.when }}</span>
+                  <span>{{ r.text }}</span>
+                </li>
+              </sc-for>
+            </ul>
+          </section>
+          <section>
+            <h4 style="font-size:18px; margin:0 0 12px">Activity</h4>
+            <ul style="list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px">
+              <sc-for list="{{ activity }}" as="a" hint-placeholder-count="4">
+                <li style="background:var(--color-surface); border-radius:var(--radius-sm); padding:10px 14px; font-size:12.5px; display:flex; gap:10px">
+                  <span style="color:var(--color-neutral-500); white-space:nowrap">{{ a.when }}</span>
+                  <span>{{ a.text }}</span>
+                </li>
+              </sc-for>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ─── FIRST-RUN / EMPTY ─── -->
+    <sc-if value="{{ empty }}" hint-placeholder-val="{{ true }}">
+      <div style="max-width:760px; margin:20px auto 0">
+        <div style="text-align:center; margin-bottom:32px">
+          <span style="width:72px; height:72px; border-radius:50%; background:var(--color-accent-100); display:inline-grid; place-items:center; margin-bottom:16px">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>
+          </span>
+          <h2 style="font-size:34px; margin:0 0 8px">Welcome aboard, let's get you flying</h2>
+          <p style="color:var(--color-neutral-600); font-size:15px; margin:0; max-width:520px; margin-inline:auto">Four quick steps and JobPilot starts finding, tailoring, and sending applications for you.</p>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:12px">
+          <sc-for list="{{ onboarding }}" as="o" hint-placeholder-count="4">
+            <div style="display:flex; align-items:center; gap:16px; background:var(--color-surface); border-radius:var(--radius-lg); padding:18px 22px; box-shadow:var(--shadow-sm)">
+              <span style="width:40px; height:40px; flex-shrink:0; border-radius:50%; display:grid; place-items:center; font-family:var(--font-heading); font-size:17px; background:{{ o.numBg }}; color:{{ o.numFg }}">{{ o.n }}</span>
+              <div style="flex:1">
+                <div style="font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px">{{ o.title }}<span style="font-size:11px; color:var(--color-neutral-500); font-weight:400">{{ o.tag }}</span></div>
+                <div style="color:var(--color-neutral-600); font-size:13px; margin-top:2px">{{ o.sub }}</div>
+              </div>
+              <button onClick="{{ o.action }}" class="btn {{ o.btnClass }}" style="flex-shrink:0">{{ o.cta }}</button>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="text-align:center; margin-top:28px">
+          <div style="border:2px dashed var(--color-neutral-400); border-radius:var(--radius-lg); padding:36px; background:var(--color-neutral-100)">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:10px"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M20 21H4"/></svg>
+            <div style="font-family:var(--font-heading); font-size:20px; margin-bottom:4px">Drop your CV to begin</div>
+            <p style="color:var(--color-neutral-600); font-size:13px; margin:0 0 16px">PDF, DOCX, TXT or Markdown — we extract your skills and roles automatically.</p>
+            <button class="btn btn-primary" style="font-size:15px; padding:12px 26px">Upload CV</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </main>
+
+  <!-- ══════════ DRAWER ══════════ -->
+  <sc-if value="{{ showDrawer }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeOverlay }}" style="position:fixed; inset:0; background:color-mix(in srgb, var(--color-neutral-900) 45%, transparent); display:flex; justify-content:flex-end; z-index:50">
+      <div onClick="{{ stop }}" class="jp-scroll" style="width:min(680px, 94vw); background:var(--color-bg); height:100%; overflow-y:auto; padding:30px 34px; position:relative; box-shadow:var(--shadow-lg)">
+        <button onClick="{{ closeOverlay }}" style="position:absolute; top:18px; right:20px; width:34px; height:34px; border-radius:50%; background:var(--color-neutral-100); border:1px solid var(--color-divider); color:var(--color-neutral-700); cursor:pointer; font-size:15px">✕</button>
+
+        <h2 style="font-size:26px; margin:0 0 2px; padding-right:44px">Senior Backend Engineer</h2>
+        <div style="color:var(--color-neutral-600); font-size:13.5px; margin-bottom:16px">Razorpay · Bangalore, India · via Career page ·
+          <a href="#" onClick="{{ stop }}">view posting ↗</a></div>
+
+        <div style="background:var(--color-accent-2-100); border-radius:var(--radius-md); padding:14px 16px; margin-bottom:14px">
+          <strong style="font-size:14px">Match score: 88%</strong>
+          <span style="color:var(--color-neutral-600); font-size:12.5px"> · stage: fresh applied</span>
+          <ul style="margin:8px 0 0 18px; color:var(--color-neutral-700); font-size:13px">
+            <li>6 yrs backend matches the 5+ requirement</li>
+            <li>Go, Postgres, Kubernetes all present in your CV</li>
+            <li>Fintech domain experience aligns with the role</li>
+          </ul>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+          <span style="font-size:12.5px; color:var(--color-neutral-600); white-space:nowrap">Recruiter email</span>
+          <input class="input" value="talent@razorpay.com" style="flex:1">
+        </div>
+
+        <div style="display:flex; gap:8px; margin:16px 0; flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" style="padding:8px 16px">↻ Regenerate</button>
+          <a class="btn btn-secondary" onClick="{{ stop }}" href="#" style="padding:8px 16px; font-size:13px">⬇ CV PDF</a>
+          <button class="btn" style="background:var(--color-accent-2-600); color:var(--color-bg); padding:8px 16px; font-size:13px">📧 Send application</button>
+          <button class="btn btn-secondary" style="margin-left:auto; color:var(--color-accent-700); padding:8px 16px; font-size:13px">Remove</button>
+        </div>
+
+        <div style="background:var(--color-accent-100); border-radius:var(--radius-md); padding:14px 16px; margin-bottom:16px">
+          <strong style="font-size:13.5px">Not happy with this draft?</strong>
+          <div style="display:flex; gap:8px; margin-top:8px">
+            <input class="input" placeholder='e.g. "make the email shorter", "emphasize fintech work"' style="flex:1">
+            <button class="btn btn-primary" style="flex-shrink:0">Ask AI to fix</button>
+          </div>
+        </div>
+
+        <h6 style="color:var(--color-neutral-600); margin:20px 0 8px">Application email</h6>
+        <pre style="background:var(--color-neutral-100); border-radius:var(--radius-md); padding:16px; white-space:pre-wrap; font-size:12.5px; font-family:ui-monospace, Menlo, monospace; line-height:1.6; margin:0; color:var(--color-text)">Subject: Senior Backend Engineer — Mohammed Jawad
+
+Hi Razorpay team,
+
+I'm a backend engineer with 6 years building high-throughput
+payment systems in Go and Postgres. At FinEdge I cut API
+latency 60% and led a team of three. I'd love to bring that
+to your payments platform.
+
+CV attached. Thank you for your time.
+— Mohammed</pre>
+
+        <h6 style="color:var(--color-neutral-600); margin:20px 0 8px">Tailored ATS CV <span style="text-transform:none; letter-spacing:0; color:var(--color-neutral-500)">— keywords: Go, Postgres, Kubernetes, payments, gRPC, latency</span></h6>
+        <pre style="background:var(--color-neutral-100); border-radius:var(--radius-md); padding:16px; white-space:pre-wrap; font-size:12.5px; font-family:ui-monospace, Menlo, monospace; line-height:1.6; margin:0; color:var(--color-text); max-height:280px; overflow-y:auto">MOHAMMED JAWAD
+Backend Engineer · Bangalore · jawad@email.com
+
+SUMMARY
+Backend engineer, 6 yrs, specialising in payment
+infrastructure and distributed systems.
+
+EXPERIENCE
+FinEdge — Senior Backend Engineer (2021–now)
+· Cut payment API latency 60% via Go rewrite + caching
+· Led a team of 3; shipped gRPC gateway handling 12k rps
+· Owned Postgres sharding for 40M+ transactions
+
+SKILLS
+Go, Postgres, Kubernetes, gRPC, Redis, AWS</pre>
+
+        <h6 style="color:var(--color-neutral-600); margin:22px 0 10px">Follow-up schedule (auto: day 3, 5, 10)</h6>
+        <ul style="list-style:none; margin:0; padding:0">
+          <sc-for list="{{ timeline }}" as="tl" hint-placeholder-count="3">
+            <li style="padding:10px 0 10px 24px; border-left:2px solid var(--color-divider); margin-left:6px; position:relative">
+              <span style="position:absolute; left:-7px; top:14px; width:12px; height:12px; border-radius:50%; background:{{ tl.dot }}"></span>
+              <div style="font-weight:700; font-size:13px">{{ tl.head }}</div>
+              <div style="color:var(--color-neutral-600); font-size:12px">{{ tl.sub }}</div>
+            </li>
+          </sc-for>
+        </ul>
+
+        <h6 style="color:var(--color-neutral-600); margin:22px 0 8px">Job description</h6>
+        <div class="jp-scroll" style="background:var(--color-neutral-100); border-radius:var(--radius-md); padding:14px 16px; max-height:180px; overflow-y:auto; color:var(--color-neutral-700); font-size:13px; line-height:1.6">Razorpay is looking for a Senior Backend Engineer to build the core payments platform. You'll design high-throughput services in Go, own Postgres data models, and work with Kubernetes at scale. 5+ years backend experience required; payments or fintech background a strong plus.</div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ SETTINGS MODAL ══════════ -->
+  <sc-if value="{{ showSettings }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeOverlay }}" style="position:fixed; inset:0; background:color-mix(in srgb, var(--color-neutral-900) 50%, transparent); display:grid; place-items:center; z-index:60; padding:24px">
+      <div onClick="{{ stop }}" class="jp-scroll" style="width:min(500px, 96vw); max-height:90vh; overflow-y:auto; background:var(--color-bg); border-radius:var(--radius-lg); padding:28px 30px; position:relative; box-shadow:var(--shadow-lg)">
+        <button onClick="{{ closeOverlay }}" style="position:absolute; top:18px; right:20px; width:34px; height:34px; border-radius:50%; background:var(--color-neutral-100); border:1px solid var(--color-divider); color:var(--color-neutral-700); cursor:pointer; font-size:15px">✕</button>
+        <h2 style="font-size:24px; margin:0 0 4px">Settings</h2>
+        <p style="color:var(--color-neutral-600); font-size:12.5px; margin:0 0 20px">Everything is stored locally on your machine — nothing goes to any server except the AI/job APIs you configure.</p>
+
+        <h6 style="color:var(--color-neutral-600); margin:0 0 8px">🔍 Job sources</h6>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:20px">
+          <label style="display:flex; gap:10px; align-items:flex-start; background:var(--color-surface); border-radius:var(--radius-md); padding:12px 14px; cursor:pointer">
+            <input type="checkbox" checked style="margin-top:3px; accent-color:var(--color-accent)">
+            <div><strong style="font-size:13.5px">Free job boards</strong> — Remotive + RemoteOK + Arbeitnow<br><small style="color:var(--color-neutral-600); font-size:11.5px">Free, work out of the box, nothing to configure.</small></div>
+          </label>
+          <label style="display:flex; gap:10px; align-items:flex-start; background:var(--color-surface); border-radius:var(--radius-md); padding:12px 14px; cursor:pointer">
+            <input type="checkbox" style="margin-top:3px; accent-color:var(--color-accent)">
+            <div><strong style="font-size:13.5px">LinkedIn</strong> <span class="tag tag-outline" style="font-size:9px; padding:1px 6px">beta</span><br><small style="color:var(--color-neutral-600); font-size:11.5px">Needs a free Apify account token.</small></div>
+          </label>
+        </div>
+
+        <h6 style="color:var(--color-neutral-600); margin:0 0 8px">🏢 Company career pages</h6>
+        <div class="field" style="margin-bottom:20px">
+          <label>Companies to watch (comma-separated board names)</label>
+          <textarea class="input" rows="2" style="border-radius:var(--radius-md)">stripe, razorpay, postman, openai</textarea>
+        </div>
+
+        <h6 style="color:var(--color-neutral-600); margin:0 0 8px">🎯 Job preferences</h6>
+        <div class="field" style="margin-bottom:12px">
+          <label>Preferred job titles</label>
+          <input class="input" value="Backend Engineer, Platform Engineer, SRE">
+        </div>
+        <div class="field" style="margin-bottom:20px">
+          <label>Preferred locations</label>
+          <input class="input" value="Bangalore, India, Remote">
+        </div>
+
+        <h6 style="color:var(--color-neutral-600); margin:0 0 8px">AI provider &amp; model</h6>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px">
+          <div class="field"><label>Provider</label><select class="input">Anthropic (Claude)</select></div>
+          <div class="field"><label>Model</label><input class="input" placeholder="claude-haiku-4-5"></div>
+        </div>
+        <div class="field" style="margin-bottom:20px">
+          <label>Anthropic (Claude) API key</label>
+          <input class="input" type="password" placeholder="configured ✓ — paste to replace">
+        </div>
+
+        <h6 style="color:var(--color-neutral-600); margin:0 0 8px">Email — Gmail (sends from your name)</h6>
+        <div class="field" style="margin-bottom:12px"><label>Your name (email "From")</label><input class="input" value="Mohammed Jawad"></div>
+        <div class="field" style="margin-bottom:20px"><label>Gmail address</label><input class="input" value="jawad@gmail.com"></div>
+
+        <div style="display:flex; gap:10px; margin-top:8px">
+          <button class="btn btn-primary">Save settings</button>
+          <button class="btn btn-secondary">Send test email to myself</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ PROFILE EDITOR MODAL ══════════ -->
+  <sc-if value="{{ showProfile }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeOverlay }}" style="position:fixed; inset:0; background:color-mix(in srgb, var(--color-neutral-900) 50%, transparent); display:grid; place-items:center; z-index:60; padding:24px">
+      <div onClick="{{ stop }}" class="jp-scroll" style="width:min(500px, 96vw); max-height:90vh; overflow-y:auto; background:var(--color-bg); border-radius:var(--radius-lg); padding:28px 30px; position:relative; box-shadow:var(--shadow-lg)">
+        <button onClick="{{ closeOverlay }}" style="position:absolute; top:18px; right:20px; width:34px; height:34px; border-radius:50%; background:var(--color-neutral-100); border:1px solid var(--color-divider); color:var(--color-neutral-700); cursor:pointer; font-size:15px">✕</button>
+        <h2 style="font-size:24px; margin:0 0 4px">Edit your profile</h2>
+        <p style="color:var(--color-neutral-600); font-size:12.5px; margin:0 0 20px">Extracted from your CV — edit anything and save. The AI uses this for scoring, CVs and emails.</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
+          <div class="field"><label>Name</label><input class="input" value="Mohammed Jawad"></div>
+          <div class="field"><label>Email</label><input class="input" value="jawad@email.com"></div>
+          <div class="field"><label>Current title</label><input class="input" value="Backend Engineer"></div>
+          <div class="field"><label>Years of experience</label><input class="input" value="6"></div>
+        </div>
+        <div class="field" style="margin-top:4px"><label>Skills (comma-separated)</label><textarea class="input" rows="2" style="border-radius:var(--radius-md)">Go, Postgres, Kubernetes, gRPC, Redis, AWS</textarea></div>
+        <div class="field"><label>Roles you're looking for</label><textarea class="input" rows="2" style="border-radius:var(--radius-md)">Senior Backend Engineer, Platform Engineer</textarea></div>
+        <div class="field"><label>Short summary about you</label><textarea class="input" rows="3" style="border-radius:var(--radius-md)">Backend engineer, 6 yrs, specialising in payment infrastructure and distributed systems.</textarea></div>
+        <div class="field"><label>Top achievements (one per line)</label><textarea class="input" rows="3" style="border-radius:var(--radius-md)">Cut API latency 60% at FinEdge
+Led a team of 3 engineers</textarea></div>
+        <div style="display:flex; gap:10px; margin-top:8px">
+          <button class="btn btn-primary">Save profile</button>
+          <button class="btn btn-secondary">Re-upload CV instead</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ REPORTS MODAL ══════════ -->
+  <sc-if value="{{ showReports }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeOverlay }}" style="position:fixed; inset:0; background:color-mix(in srgb, var(--color-neutral-900) 50%, transparent); display:grid; place-items:center; z-index:60; padding:24px">
+      <div onClick="{{ stop }}" class="jp-scroll" style="width:min(500px, 96vw); max-height:90vh; overflow-y:auto; background:var(--color-bg); border-radius:var(--radius-lg); padding:28px 30px; position:relative; box-shadow:var(--shadow-lg)">
+        <button onClick="{{ closeOverlay }}" style="position:absolute; top:18px; right:20px; width:34px; height:34px; border-radius:50%; background:var(--color-neutral-100); border:1px solid var(--color-divider); color:var(--color-neutral-700); cursor:pointer; font-size:15px">✕</button>
+        <h2 style="font-size:24px; margin:0 0 4px">📊 Improvement reports</h2>
+        <p style="color:var(--color-neutral-600); font-size:12.5px; margin:0 0 16px">Auto-generated every 50 applications and after each automated run, emailed to jawad@gmail.com. 12 applications since the last report.</p>
+        <button class="btn btn-primary btn-sm" style="margin-bottom:16px">Generate report now</button>
+        <div style="display:flex; flex-direction:column; gap:10px">
+          <sc-for list="{{ reports }}" as="rep" hint-placeholder-count="2">
+            <div style="background:var(--color-surface); border-radius:var(--radius-md); padding:14px 16px">
+              <div style="font-weight:700; font-size:13.5px">{{ rep.subject }}</div>
+              <div style="color:var(--color-neutral-600); font-size:11.5px; margin-top:2px">{{ rep.meta }}</div>
+              <div style="color:var(--color-neutral-700); font-size:12.5px; margin-top:8px; line-height:1.5">{{ rep.summary }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:940},&quot;startState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;populated&quot;,&quot;first-run&quot;],&quot;default&quot;:&quot;populated&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;showRunLog&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;boardDensity&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;],&quot;default&quot;:&quot;comfortable&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Layout&quot;}}">
+class Component extends DCLogic {
+  state = { view: null, overlay: null };
+
+  get curView() {
+    return this.state.view ?? (this.props.startState === 'first-run' ? 'empty' : 'populated');
+  }
+
+  renderVals() {
+    const stop = (e) => { e.stopPropagation(); };
+    const setView = (v) => this.setState({ view: v, overlay: null });
+    const setOverlay = (o) => (e) => { if (e) e.stopPropagation(); this.setState({ overlay: o }); };
+    const populated = this.curView === 'populated';
+
+    const NEU = (n) => `var(--color-neutral-${n})`;
+    const AC = (n) => `var(--color-accent-${n})`;
+    const AC2 = (n) => `var(--color-accent-2-${n})`;
+
+    // score badge styles
+    const scoreStyle = (s) => s >= 75
+      ? { scoreBg: AC2(200), scoreFg: AC2(800) }
+      : s >= 55 ? { scoreBg: AC(200), scoreFg: AC(800) }
+      : { scoreBg: NEU(200), scoreFg: NEU(700) };
+    const doneBadge = (t) => ({ text: t, bg: AC2(200), fg: AC2(800) });
+    const warnBadge = (t) => ({ text: t, bg: AC(200), fg: AC(800) });
+    const pips = (sentDays) => [3, 5, 10].map(d => ({ color: sentDays.includes(d) ? AC(500) : NEU(300) }));
+
+    const mk = (o) => ({
+      ...o, ...scoreStyle(parseInt(o.score)),
+      open: setOverlay('drawer'),
+      badges: o.badges || [], applied: !!o.applied, pips: pips(o.sentDays || []),
+    });
+
+    const colDefs = [
+      { label: 'Discovered', color: NEU(500), cards: [
+        mk({ title: 'Platform Engineer', company: 'Postman · Bangalore', score: '81%' }),
+        mk({ title: 'Backend Engineer', company: 'Zerodha · Remote', score: '76%' }),
+        mk({ title: 'Site Reliability Eng', company: 'Swiggy · Bangalore', score: '52%' }),
+      ]},
+      { label: 'Approved', color: AC2(400), cards: [
+        mk({ title: 'Senior Go Engineer', company: 'Cred · Bangalore', score: '84%' }),
+      ]},
+      { label: 'CV Ready', color: AC(400), cards: [
+        mk({ title: 'Backend Engineer', company: 'Stripe · Remote', score: '90%', badges: [doneBadge('CV ✓'), doneBadge('@ direct')] }),
+        mk({ title: 'Payments Engineer', company: 'PhonePe · Bangalore', score: '79%', badges: [doneBadge('CV ✓')] }),
+      ]},
+      { label: 'Your action ✋', color: AC(600), cards: [
+        mk({ title: 'Platform Engineer', company: 'Notion · Remote', score: '82%', badges: [warnBadge('✋ apply on platform'), doneBadge('CV ✓')] }),
+        mk({ title: 'Infra Engineer', company: 'Figma · Remote', score: '77%', badges: [warnBadge('✋ apply on platform')] }),
+      ]},
+      { label: 'Applied', color: AC2(600), cards: [
+        mk({ title: 'Senior Backend Engineer', company: 'Razorpay · Bangalore', score: '88%', applied: true, sentDays: [] }),
+        mk({ title: 'Backend Engineer', company: 'Groww · Bangalore', score: '80%', applied: true, sentDays: [3] }),
+        mk({ title: 'Go Developer', company: 'Meesho · Remote', score: '74%', applied: true, sentDays: [] }),
+      ]},
+      { label: 'Follow-up', color: AC(500), cards: [
+        mk({ title: 'Platform Engineer', company: 'Dunzo · Bangalore', score: '78%', applied: true, sentDays: [3, 5], badges: [doneBadge('rcvd ✓')] }),
+        mk({ title: 'Backend Engineer', company: 'Rapido · Bangalore', score: '72%', applied: true, sentDays: [3, 5, 10] }),
+      ]},
+      { label: 'Replied ⭐', color: AC(500), cards: [
+        mk({ title: 'Senior Backend Engineer', company: 'Freshworks · Chennai', score: '86%', applied: true, sentDays: [3], badges: [doneBadge('Reply ⭐')] }),
+      ]},
+      { label: 'Interview', color: AC2(700), cards: [
+        mk({ title: 'Staff Engineer', company: 'Zeta · Bangalore', score: '91%', applied: true, sentDays: [3], badges: [doneBadge('Interview 🎉')] }),
+      ]},
+      { label: 'Closed', color: NEU(400), cards: [
+        mk({ title: 'Backend Engineer', company: 'Ola · Bangalore', score: '68%', applied: true, sentDays: [3, 5, 10] }),
+      ]},
+    ];
+    const columns = colDefs.map(c => ({ ...c, count: c.cards.length }));
+
+    const funnelCounts = colDefs.map(c => c.cards.length);
+    const funMax = Math.max(...funnelCounts);
+    const funnel = colDefs.map((c, i) => ({
+      color: c.color, label: `${c.label}: ${funnelCounts[i]}`,
+      h: `${Math.max(10, (funnelCounts[i] / funMax) * 100)}%`,
+    }));
+
+    const stats = [
+      { num: '68', label: 'Jobs found', color: 'var(--color-text)' },
+      { num: '31', label: 'Applied', color: AC2(700) },
+      { num: '18', label: 'Follow-ups sent', color: AC(600) },
+      { num: '5', label: 'Replies ⭐', color: AC(600) },
+      { num: '2', label: 'Interviews', color: AC2(700) },
+    ];
+
+    const flightSteps = [
+      { n: '1', title: 'Find jobs', sub: '68 on board', done: true },
+      { n: '2', title: 'Generate', sub: '2 tailored', done: true },
+      { n: '3', title: 'Send', sub: '2 ready now', active: true },
+    ].map(s => ({
+      ...s,
+      bg: s.active ? AC2(100) : 'transparent',
+      border: s.active ? AC2(300) : 'var(--color-divider)',
+      dotBg: s.done && !s.active ? AC2(500) : s.active ? AC2(600) : NEU(300),
+      dotFg: 'var(--color-bg)',
+      titleColor: s.active ? AC2(800) : 'var(--color-text)',
+    }));
+
+    const runs = [
+      { when: 'Jul 20 · 09:12', text: '🖐 manual · 12 found → 8 tailored → 6 emailed + 2 for you · AI $0.04 + API $0.00 = $0.04' },
+      { when: 'Jul 19 · 06:00', text: '🤖 auto · 20 found → 14 tailored → 11 emailed · AI $0.05 + API $0.02 = $0.07' },
+      { when: 'Jul 18 · 21:40', text: '🖐 manual · 9 found → 5 tailored → 5 emailed · AI $0.03 + API $0.00 = $0.03' },
+    ];
+    const activity = [
+      { when: 'Jul 20 · 11:04', text: 'Interview invite from Zeta 🎉 — moved to Interview' },
+      { when: 'Jul 20 · 09:14', text: 'Sent 6 applications with tailored CVs attached' },
+      { when: 'Jul 20 · 08:30', text: 'Reply from Freshworks recruiter ⭐' },
+      { when: 'Jul 19 · 18:22', text: 'Day-3 follow-up sent to Groww' },
+    ];
+
+    const sources = [
+      { name: 'Career pages (ATS)', note: 'live', on: true },
+      { name: 'Free boards ×3', note: 'live', on: true },
+      { name: 'Adzuna', note: 'live', on: true },
+      { name: 'LinkedIn (Apify)', note: 'off', on: false },
+      { name: 'Naukri (Apify)', note: 'off', on: false },
+    ].map(s => ({ ...s, dot: s.on ? AC2(500) : NEU(300) }));
+
+    const skills = ['Go', 'Postgres', 'Kubernetes', 'gRPC', 'Redis', 'AWS'];
+
+    const onboarding = [
+      { n: '1', title: 'Add an AI key', tag: 'required', sub: 'Groq is free — powers scoring, CVs & emails.', cta: 'Add key', btnClass: 'btn-primary', action: setOverlay('settings'), numBg: AC(600), numFg: 'var(--color-bg)' },
+      { n: '2', title: 'Set job preferences', tag: 'recommended', sub: 'Titles and locations so matches stay relevant.', cta: 'Set up', btnClass: 'btn-secondary', action: setOverlay('settings'), numBg: AC(200), numFg: AC(800) },
+      { n: '3', title: 'Connect Gmail', tag: 'optional', sub: 'Send applications & follow-ups from your name.', cta: 'Connect', btnClass: 'btn-secondary', action: setOverlay('settings'), numBg: AC2(200), numFg: AC2(800) },
+      { n: '4', title: 'Upload your CV', tag: 'required', sub: "We'll extract your skills and roles automatically.", cta: 'Upload', btnClass: 'btn-primary', action: () => {}, numBg: AC(600), numFg: 'var(--color-bg)' },
+    ];
+
+    const timeline = [
+      { head: 'Day 3 follow-up — sent ✓', sub: 'Jul 20 · 09:00 → talent@razorpay.com', dot: AC(500) },
+      { head: 'Day 5 follow-up — scheduled', sub: 'due Jul 22 (sent automatically, or click Sync)', dot: NEU(300) },
+      { head: 'Day 10 follow-up — scheduled', sub: 'due Jul 27', dot: NEU(300) },
+    ];
+    const reports = [
+      { subject: 'Reply rate climbing — 16% on career-page sources', meta: 'Jul 18 · trigger: 50 applications', summary: 'Career-page applies reply 3× more than free boards. Consider adding more company boards and trimming low-score board applies.' },
+      { subject: 'Emails over 150 words underperform', meta: 'Jul 10 · trigger: auto run', summary: 'Shorter emails (under 120 words) get 2× the reply rate. A "keep emails short" instruction has been suggested for the Email step.' },
+    ];
+
+    return {
+      stop, closeOverlay: setOverlay(null),
+      openSettings: setOverlay('settings'), openProfile: setOverlay('profile'), openReports: setOverlay('reports'),
+      setPopulated: () => setView('populated'), setEmptyState: () => setView('empty'),
+      isPopulated: populated, isEmpty: !populated,
+      populated, empty: !populated,
+      showDrawer: this.state.overlay === 'drawer',
+      showSettings: this.state.overlay === 'settings',
+      showProfile: this.state.overlay === 'profile',
+      showReports: this.state.overlay === 'reports',
+      columns, funnel, stats, flightSteps, runs, activity, sources, skills, onboarding, timeline, reports,
+    };
+  }
+}
+</script>
+</body>
+</html>
