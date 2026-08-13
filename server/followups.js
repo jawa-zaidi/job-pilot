@@ -2,7 +2,7 @@
 // laptop time (appliedAt / sentAt are stored on each application, so the
 // schedule survives restarts and device moves). Runs on an interval and on
 // demand — the Sync button calls processFollowUps() to send everything due.
-const { load, save, logActivity } = require('./db');
+const { load, save, logActivity, sendingMode } = require('./db');
 const llm = require('./llm');
 const email = require('./email');
 
@@ -19,6 +19,7 @@ async function processFollowUps() {
   const db = load();
   const current = Date.now();
   const paced = email.isConfigured();
+  const mine = sendingMode() === 'myself';
   let sentCount = 0;
   let realSent = 0;
   let changed = false;
@@ -28,11 +29,15 @@ async function processFollowUps() {
     // stop following up once there's a reply, a decision, or the thread is closed
     if (['interview', 'offer', 'rejected', 'replied', 'closed'].includes(app.status) || app.replied) continue;
 
-    // Manual platform applications have nobody to email — remind the user to
-    // follow up on the platform instead (same day 3/5/10 cadence). If they
-    // later paste a recruiter email on the card, the automatic email
-    // follow-ups below take over for the remaining days.
-    if (!app.recipientEmail) {
+    // JobPilot only chases by email what it actually sent by email. That means:
+    // no address to write to, the person applied themselves, or the person is
+    // the one who sends — in all three the nudge is theirs, and we remind them
+    // here (same day 3/5/10 cadence) instead of writing to a recruiter in their
+    // name. If they later paste an address on the card AND we are the sender,
+    // the automatic emails below take over for the remaining days.
+    const sentByUs = !(app.applicationSent && app.applicationSent.manual);
+    const chasedByUs = !mine && !!app.recipientEmail && sentByUs;
+    if (!chasedByUs) {
       app.followups = app.followups || [];
       app.reminded = app.reminded || [];
       for (const day of FOLLOW_UP_DAYS) {
@@ -40,8 +45,9 @@ async function processFollowUps() {
         if (app.followups.some(f => f.day === day) || app.reminded.includes(day)) continue;
         app.reminded.push(day);
         if (app.status === 'applied') app.status = 'followup';
+        // Wording read by the Home feed's rule for this line — change both together.
         logActivity(
-          `⏰ Follow-up due (day ${day}): ${app.title} at ${app.company} — you applied on the platform, follow up there and mark it done on the card (or add a recruiter email to automate)`,
+          `⏰ Follow-up due (day ${day}): ${app.title} at ${app.company} — this one is yours to nudge: message them wherever you applied, then mark it done on the card`,
           'followup'
         );
         changed = true;

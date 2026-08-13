@@ -8,7 +8,8 @@ const multer = require('multer');
 require('./log').install();
 
 const { load, save, now, logActivity, isFirstRun, DATA_DIR, saveCvOriginal,
-        listProfiles, createProfile, switchProfile, deleteProfile, renameProfile } = require('./db');
+        listProfiles, createProfile, switchProfile, deleteProfile, renameProfile,
+        welcomeSettings, sendingMode } = require('./db');
 const llm = require('./llm');
 const email = require('./email');
 const { sourcesConfig, clearAtsCache } = require('./jobs');
@@ -268,9 +269,10 @@ app.patch('/api/applications/:id', (req, res) => {
   if (recipientEmail !== undefined) {
     a.recipientEmail = recipientEmail.trim();
     a.applyPath = a.recipientEmail ? 'email' : 'manual';
-    // adding an address to a "Your action" card puts it back on the email path
-    if (a.recipientEmail && a.status === 'action' && a.tailored) a.status = 'ready';
-    if (!a.recipientEmail && a.status === 'ready') a.status = 'action';
+    // Adding an address to a "Your action" card puts it back on the email path —
+    // but only if JobPilot is the one who sends. batch.sendPath() is the single
+    // place that decides, so this can never disagree with the batch.
+    if (a.tailored && ['ready', 'action'].includes(a.status)) a.status = batch.sendPath(a);
   }
   save();
   res.json({ application: a });
@@ -374,8 +376,22 @@ app.post('/api/applications/:id/apply', async (req, res) => {
   try {
     const db = load();
     const a = db.applications.find(x => x.id === req.params.id);
-    if (!a) return res.status(404).json({ error: 'Not found' });
-    if (!a.tailored) return res.status(400).json({ error: 'Generate the tailored CV & email first' });
+    if (!a) return res.status(404).json({ error: "We can't find that one — it may have been removed." });
+    if (!a.tailored) return res.status(400).json({ error: 'Write the CV and the message for this one first, then it can go.' });
+
+    // Two things JobPilot must never do: send in somebody's name when they said
+    // they would send it themselves, and record an application as gone when
+    // there was nobody to send it to. Either way the card becomes theirs to act
+    // on — written, ready, and honestly labelled.
+    if (sendingMode() === 'myself' || !a.recipientEmail) {
+      a.status = 'action';
+      save();
+      return res.status(400).json({
+        error: sendingMode() === 'myself'
+          ? "You chose to send your applications yourself, so we haven't emailed this one. It's written and waiting — copy the message, take the CV, and tell us once it has gone."
+          : "There's nobody to send this one to yet. Put an address in the box above, or apply on their own site and tell us you've done it."
+      });
+    }
 
     // don't email about a posting that died since discovery
     const alive = await require('./verify').verifyJobLive(a);
@@ -423,8 +439,30 @@ app.post('/api/applications/:id/apply', async (req, res) => {
 
 // ---------- Settings ----------
 
+// First-run wizard state, stored inside the ordinary settings object so there
+// is exactly one persistence path. `needed` is the server's judgment on whether
+// this install should be walked through setup:
+//   - already finished (or deliberately skipped) → never again
+//   - stopped part-way through → resume at that step, even after a restart
+//   - otherwise only when the install is genuinely untouched, so an existing
+//     user with a CV, applications or settings of their own is never dragged in.
+function onboardingState(s) {
+  const ob = s.onboarding || {};
+  const db = load();
+  const configured = !!(s.groqKey || s.openaiKey || s.anthropicKey || s.provider || s.model ||
+    s.smtpUser || s.apifyToken || s.atsCompanies || s.adzunaAppId ||
+    (s.jobTitles || []).length || (s.jobLocations || []).length);
+  const untouched = !db.profile && !(db.applications || []).length && !configured;
+  return {
+    done: !!ob.done,
+    step: ob.step || '',
+    needed: !ob.done && (!!ob.step || untouched)
+  };
+}
+
 app.get('/api/settings', (req, res) => {
   const s = load().settings || {};
+  const w = welcomeSettings();
   const info = llm.providerInfo();
   const groqKey = s.groqKey || process.env.GROQ_API_KEY || '';
   const openaiKey = s.openaiKey || process.env.OPENAI_API_KEY || '';
@@ -454,6 +492,12 @@ app.get('/api/settings', (req, res) => {
     autoSearchHours: autoSearchConfig().hours,
     lastAutoSearchAt: load().lastAutoSearchAt || null,
     firstRun: isFirstRun(),
+    onboarding: onboardingState(s),
+    // The revamped welcome questions. `welcomeNeeded` is false for anyone who
+    // was already using JobPilot before these fields existed — see db.js.
+    welcomeDone: w.done,
+    welcomeNeeded: w.needed,
+    sendingMode: w.sendingMode,
     dataDir: DATA_DIR,
     insightsEnabled: insights.insightsConfig().enabled,
     insightsEvery: insights.insightsConfig().every,
@@ -549,9 +593,90 @@ app.post('/api/settings', (req, res) => {
   if (req.body.devFeedbackEnabled !== undefined) db.settings.devFeedbackEnabled = !!req.body.devFeedbackEnabled;
   if (req.body.insightsEvery !== undefined) db.settings.insightsEvery = Math.max(5, Number(req.body.insightsEvery) || 50);
   if (req.body.insightsEmail !== undefined) db.settings.insightsEmail = String(req.body.insightsEmail).trim();
+  // The welcome questions. `welcomeDone` is the "they've been through it" flag
+  // and `sendingMode` is who presses send — see db.js for what an unset value
+  // means for installs that predate both fields.
+  const wasWelcomed = welcomeSettings().done;
+  if (req.body.welcomeDone !== undefined) db.settings.welcomeDone = !!req.body.welcomeDone;
+  if (req.body.sendingMode !== undefined) {
+    db.settings.sendingMode = req.body.sendingMode === 'jobpilot' ? 'jobpilot' : 'myself';
+  }
+  // Setup-wizard progress. Written on every step so closing the browser mid-way
+  // resumes exactly where the user stopped instead of starting over.
+  const ob = req.body.onboarding;
+  if (ob !== undefined && ob && typeof ob === 'object') {
+    const prev = db.settings.onboarding || {};
+    db.settings.onboarding = {
+      step: ob.step !== undefined ? String(ob.step).slice(0, 32) : (prev.step || ''),
+      done: ob.done !== undefined ? !!ob.done : !!prev.done,
+      updatedAt: now()
+    };
+  }
   save();
-  logActivity('Settings updated', 'settings');
-  res.json({ ok: true });
+  // Changing who presses send re-routes everything already written, straight
+  // away: nothing may sit in "ready to email" once they've said they send.
+  if (req.body.sendingMode !== undefined) batch.applySendingMode();
+  // Answering five questions would otherwise post five "Settings updated" lines
+  // into a brand-new user's activity feed — the first thing they ever see there.
+  // Send `quiet: true` alongside a step-by-step save to keep it out of the feed.
+  const quiet = ob !== undefined || req.body.quiet === true ||
+                req.body.welcomeDone !== undefined || req.body.sendingMode !== undefined;
+  if (!quiet) logActivity('Settings updated', 'settings');
+  if (db.settings.onboarding?.done && ob !== undefined) {
+    logActivity('Setup finished — JobPilot is ready to find jobs', 'settings');
+  } else if (!wasWelcomed && welcomeSettings().done) {
+    logActivity('Setup finished — JobPilot is ready to find jobs', 'settings');
+  }
+  const w = welcomeSettings();
+  res.json({
+    ok: true,
+    onboarding: onboardingState(db.settings),
+    welcomeDone: w.done,
+    welcomeNeeded: w.needed,
+    sendingMode: w.sendingMode
+  });
+});
+
+// Does the configured AI actually work? The wizard's "Test it" button calls this
+// after saving, so the answer reflects exactly what the app will use. It makes
+// one small real request — a claimed-good key that 401s is the whole point.
+// Nothing here logs, echoes or returns a key.
+app.post('/api/settings/test-ai', async (req, res) => {
+  const info = llm.providerInfo();
+  const label = (llm.PROVIDERS[info.provider] || {}).label || info.provider;
+  if (!info.hasKey) {
+    return res.status(400).json({
+      error: info.provider === 'claude_code'
+        ? llm.claudeCodeStatus().detail
+        : `Nothing is saved for ${label} yet — paste the code in and try again.`
+    });
+  }
+  try {
+    const out = await llm.extractProfile(
+      'Alex Taylor\nalex@example.com\nSoftware Engineer, 3 years, JavaScript and SQL.'
+    );
+    if (!out || !Array.isArray(out.skills)) throw new Error('the answer came back in a form we could not read');
+    logActivity(`AI connection test passed — ${label} (${info.model})`, 'settings');
+    res.json({
+      ok: true,
+      message: info.subscription
+        ? 'Working — JobPilot will write your CVs and messages through your Claude subscription, at no extra charge.'
+        : `Working — JobPilot can write your CVs and messages, using ${label}.`
+    });
+  } catch (err) {
+    const m = String(err.message || '');
+    let plain = `That didn't work — ${m.slice(0, 160)}`;
+    if (/not accepted|rejected|401|403|invalid.*key/i.test(m)) {
+      plain = 'That code was not accepted. Check you copied the whole thing with no spaces, then try again.';
+    } else if (/allowance|enough requests|limit|429|quota/i.test(m)) {
+      plain = "This account's free allowance is used up for now. Try again later, or pick a different option above.";
+    } else if (/took too long|timed out|ETIMEDOUT|ENOTFOUND|fetch failed|network/i.test(m)) {
+      plain = 'No answer came back — check your internet connection and try again.';
+    } else if (/Claude/i.test(m)) {
+      plain = m.slice(0, 200); // already says exactly what to do
+    }
+    res.status(400).json({ error: plain });
+  }
 });
 
 app.post('/api/settings/test-email', async (req, res) => {
@@ -629,6 +754,9 @@ app.post('/api/demo/reset', (req, res) => {
 function start() {
   const server = app.listen(PORT, HOST, () => {
     const shownHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+    // Anything already written but no longer on the right path (an existing
+    // store, or a mode changed while the app was closed) is re-routed once here.
+    try { batch.applySendingMode(); } catch { /* never block start-up */ }
     console.log(`JobPilot is running. Open it at http://${shownHost}:${PORT}`);
     if (LAN) {
       console.log('Careful: anyone on your network can open this copy of JobPilot — read your CV, change your settings and send email as you. Close JobPilot and start it normally to keep it to this computer.');

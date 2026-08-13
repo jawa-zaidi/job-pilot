@@ -237,6 +237,55 @@ function isFirstRun() {
   return firstRun;
 }
 
+// ---------- Settings added by the revamp ----------
+//
+// Two fields, both optional in the stored file so an existing ~/JobPilotData
+// keeps working untouched:
+//
+//   settings.welcomeDone   true once the person has been through the welcome
+//                          questions (or chosen to skip them).
+//   settings.sendingMode   'jobpilot' — we email each application for them
+//                          'myself'   — we write it, they press send
+//
+// Neither is ever written on read. `welcomeSettings()` answers what an unset
+// field MEANS for this particular install, which is what keeps upgrades safe:
+// somebody who already has a CV, applications, a finished old setup guide or
+// any configuration of their own is treated as long since welcomed and is
+// never dragged through onboarding. Only a genuinely untouched install is.
+const SETTINGS_DEFAULTS = { welcomeDone: false, sendingMode: 'myself' };
+
+function looksConfigured(s) {
+  return !!(s.groqKey || s.openaiKey || s.anthropicKey || s.provider || s.model ||
+    s.smtpUser || s.apifyToken || s.atsCompanies || s.adzunaAppId ||
+    (s.jobTitles || []).length || (s.jobLocations || []).length);
+}
+
+function welcomeSettings() {
+  const c = load();
+  const s = c.settings || {};
+  const established = !!c.profile ||
+    (c.applications || []).length > 0 ||
+    !!(s.onboarding || {}).done ||
+    looksConfigured(s);
+  const done = s.welcomeDone !== undefined ? !!s.welcomeDone : established;
+  return {
+    done,
+    needed: !done,
+    // Unset but already sending by email? Then email is plainly how they send.
+    sendingMode: s.sendingMode === 'jobpilot' || s.sendingMode === 'myself'
+      ? s.sendingMode
+      : (s.smtpUser ? 'jobpilot' : SETTINGS_DEFAULTS.sendingMode)
+  };
+}
+
+// Who presses send, normalised — 'jobpilot' or 'myself'. Every send path must
+// ask this before it puts anything on the wire: in 'myself' the person sends,
+// so JobPilot may write and prepare, but may never email, never mark a job
+// applied and never start a follow-up clock on their behalf.
+function sendingMode() {
+  return welcomeSettings().sendingMode;
+}
+
 // Real laptop time. Applied/follow-up timestamps are stored per application,
 // so schedules survive restarts and device moves.
 function now() {
@@ -252,5 +301,6 @@ function logActivity(text, type = 'info') {
 
 module.exports = {
   load, save, now, logActivity, isFirstRun, DATA_DIR, saveCvOriginal,
-  listProfiles, createProfile, switchProfile, deleteProfile, renameProfile
+  listProfiles, createProfile, switchProfile, deleteProfile, renameProfile,
+  welcomeSettings, sendingMode, SETTINGS_DEFAULTS
 };

@@ -3,10 +3,15 @@
 // the whole cycle unattended.
 //
 // Applications are routed by apply path:
-//   email  — a recruiter address was found → we email the tailored CV (PDF) directly
-//   manual — no address; after generation the card moves to "Your action" where
-//            the user applies on the platform and clicks "I applied" to confirm
-const { load, save, now, logActivity } = require('./db');
+//   email  — a recruiter address was found AND the person asked JobPilot to send
+//            → we email the tailored CV (PDF) directly
+//   manual — no address, or they said "I'll send them myself"; after generation
+//            the card moves to "Your action", where they send it (or apply on
+//            the platform) and click "I applied" to confirm
+//
+// `settings.sendingMode` decides which of those two an emailable job takes, and
+// it is honoured in one place only — `sendPath()` below — so nothing can drift.
+const { load, save, now, logActivity, sendingMode } = require('./db');
 const llm = require('./llm');
 const emailer = require('./email');
 const costs = require('./costs');
@@ -34,11 +39,34 @@ function factCheckEnabled() {
   return load().settings?.factCheck !== false; // on by default
 }
 
+// The single decision every send path defers to. A written application is
+// either ours to email ('ready') or theirs to send ('action') — there is no
+// third answer, and the person's own choice always wins over the fact that we
+// happen to have found an address.
+function sendPath(a) {
+  return a.recipientEmail && sendingMode() === 'jobpilot' ? 'ready' : 'action';
+}
+
+// Re-route everything already written whenever the answer to that question can
+// have changed: at start-up (so an existing store catches up) and the moment
+// the person changes the setting. Nothing else about the job is touched.
+function applySendingMode() {
+  const db = load();
+  let moved = 0;
+  for (const a of db.applications) {
+    if (!a.tailored || !['ready', 'action'].includes(a.status)) continue;
+    const want = sendPath(a);
+    if (a.status !== want) { a.status = want; moved++; }
+  }
+  if (moved) save();
+  return moved;
+}
+
 // Step 1: fetch across multiple queries derived from the CV until the target
 // number of unapplied matches is on the board (or sources are exhausted).
 async function fetchBatch(target) {
   const db = load();
-  if (!db.profile) throw new Error('Upload your CV first');
+  if (!db.profile) throw new Error("We need your CV first — it's what every application is written from.");
   target = target || dailyTarget();
   runs.beginIfNeeded('manual'); // joins the auto run when one is already open
 
@@ -89,9 +117,12 @@ async function fetchBatch(target) {
   // Never end a fetch with an unexplained zero — say what blocked it.
   let reason = '';
   if (!used.length) {
-    reason = `Fetch skipped: ${pendingCount()} jobs already on the board waiting for review/generation/sending (per-cycle target: ${target}). ` +
-      'Work through them (or remove them with ✕), or raise the per-cycle target in Settings.';
-    logActivity(`⚠️ ${reason}`, 'search');
+    const waiting = pendingCount();
+    // The day's activity is rewritten for the Home feed by its exact shape —
+    // leave this line's wording alone. What a person reads is `reason`, below.
+    logActivity(`⚠️ Fetch skipped: ${waiting} jobs already on the board waiting for review/generation/sending (per-cycle target: ${target}).`, 'search');
+    reason = `We didn't go looking this time — ${waiting} ${waiting === 1 ? 'job is' : 'jobs are'} already waiting for you. `
+      + 'Work through those (or drop the ones you do not want), and we will look again.';
   } else {
     // sources ran but produced nothing → the toast must carry the WHY
     if (!added && notes.size) reason = [...notes].join(' · ');
@@ -139,19 +170,16 @@ async function generateAll({ statuses = ['discovered', 'approved'], minScore = 0
         }
       }
       a.tailoredAt = now();
-      if (a.recipientEmail) {
-        a.status = 'ready';
-      } else {
-        a.status = 'action'; // your move: apply on the platform, then confirm
-        manualQueued++;
-      }
+      a.status = sendPath(a); // 'ready' = ours to email, 'action' = theirs to send
+      if (a.status === 'action') manualQueued++;
       save();
       done++;
     } catch (err) {
       failed++;
       lastError = err.message;
       console.error(`generate failed for ${a.title}:`, err.message);
-      if (err.message.includes('daily limit')) break; // no point hammering a rate-limited API
+      // no point hammering a service that has told us to stop
+      if (err.httpStatus === 429 || /allowance|enough requests/i.test(err.message)) break;
     }
   }
   const cost = costs.endRun(runStart);
@@ -159,8 +187,9 @@ async function generateAll({ statuses = ['discovered', 'approved'], minScore = 0
   runs.clearBusy();
   if (done || failed) {
     logActivity(
+      // Wording read by the Home feed's rule for this line — change both together.
       `Batch generate: ${done} tailored CVs & emails ready${fixed ? ` (${fixed} corrected by fact-check)` : ''}` +
-      `${manualQueued ? `, ${manualQueued} need you to apply on the platform (Your action column)` : ''}` +
+      `${manualQueued ? `, ${manualQueued} for you to send yourself (Your action column)` : ''}` +
       `${failed ? `, ${failed} failed` : ''} · cost ${costs.fmt(cost.usd)}`, 'tailor');
   }
   save();
@@ -169,8 +198,29 @@ async function generateAll({ statuses = ['discovered', 'approved'], minScore = 0
 
 // Step 3: send everything on the email path. Each job is re-checked against
 // its source right before sending — expired postings are closed, not applied to.
+//
+// When the person said "I'll send them myself" this step does not send. It hands
+// every written application back to them under "Needs you" and stops. Nothing is
+// marked applied, no `appliedAt` is stamped and no follow-up clock starts,
+// because none of that would be true.
 async function sendAll({ skipInsights = false, minScore = 0 } = {}) {
   const db = load();
+
+  if (sendingMode() === 'myself') {
+    const handedBack = applySendingMode();
+    const waiting = db.applications.filter(a => a.status === 'action' && a.tailored).length;
+    runs.clearBusy();
+    const run = runs.finishRun();
+    if (waiting) {
+      // Wording read by the Home feed's rule for this line — change both together.
+      logActivity(`Ready for you to send: ${waiting} written and waiting — nothing was emailed, because you send these yourself`, 'apply');
+    }
+    return {
+      sent: 0, simulated: 0, failed: 0, expired: 0, heldBack: 0, total: 0,
+      yoursToSend: true, handedBack, waiting, run, cost: { usd: 0, ai: 0, source: 0 }
+    };
+  }
+
   const targets = db.applications.filter(a =>
     a.status === 'ready' && a.tailored && a.recipientEmail && (a.matchScore || 0) >= minScore);
   const heldBack = db.applications.filter(a =>
@@ -238,7 +288,7 @@ async function runAutoCycle(target) {
   const run = sendResult.run;
   logActivity(
     `Auto cycle complete: ${fetch.added} found, ${generated.done} tailored, ${sendResult.sent + sendResult.simulated} emailed, ` +
-    `${generated.manualQueued || 0} waiting for you in "Your action"` +
+    `${sendResult.yoursToSend ? sendResult.waiting || 0 : generated.manualQueued || 0} waiting for you in "Your action"` +
     `${generated.heldBack ? `, ${generated.heldBack} below the ${floor}% auto threshold left for review` : ''} · ` +
     `cost ${costs.fmt(run ? run.costTotal : 0)}`, 'apply');
   // auto feedback: one report per automated run (when anything was sent)
@@ -247,4 +297,7 @@ async function runAutoCycle(target) {
   return { fetch, generated, sendResult, run, cost: { usd: run ? run.costTotal : 0, ai: run ? run.costAI : 0, source: run ? run.costSource : 0 } };
 }
 
-module.exports = { fetchBatch, approveAll, generateAll, sendAll, runAutoCycle, dailyTarget, autoMinScore };
+module.exports = {
+  fetchBatch, approveAll, generateAll, sendAll, runAutoCycle,
+  dailyTarget, autoMinScore, sendPath, applySendingMode
+};
