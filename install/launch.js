@@ -387,11 +387,16 @@ async function main() {
   }
 
   tryGitUpdate();
-  const firstTime = installDependencies();
+  const installedNow = installDependencies();
   ensureMacApp();
-  if (firstTime) ensureWindowsShortcuts();
 
   const { dir, hasData } = ensureDataFolder();
+
+  // Desktop and Start Menu shortcuts, on what looks like a first run. "No data
+  // folder yet" is the signal rather than "we just installed dependencies",
+  // because a download has its dependencies already — and hanging this off the
+  // install would mean a downloaded copy never got shortcuts at all.
+  if (installedNow || !hasData) ensureWindowsShortcuts();
 
   say('');
   say(`  📁 Your data folder:  ${dir}`);

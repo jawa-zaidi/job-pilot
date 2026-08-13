@@ -86,6 +86,7 @@ const ALL_TARGETS = [
     runtimePath: 'runtime/node.exe',
     expectBinary: 'pe-x64',
     launchers: ['JobPilot.bat', 'setup.bat'],
+    crlf: true,
   },
   {
     id: 'linux-x64',
@@ -428,6 +429,8 @@ function stageTarget(target, runtimeBinary) {
     skip: (name) => name === '.bin' || isPrivate(name),
   });
 
+  if (target.crlf) crlfWindowsScripts(app);
+
   const runtimeFile = path.join(app, ...target.runtimePath.split('/'));
   fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
   fs.writeFileSync(runtimeFile, runtimeBinary);
@@ -442,6 +445,24 @@ function stageTarget(target, runtimeBinary) {
     + 'already have Node.js installed — it will simply use yours instead.\n');
 
   return app;
+}
+
+// The repository keeps .bat and .vbs files with plain newlines, which is what
+// git and every editor on this machine want. cmd.exe does not: a batch file
+// with a `goto` in it and no carriage returns is a well-known way to get "the
+// system cannot find the batch label specified" on someone else's computer.
+// The Windows download gets carriage returns put back, so the repo stays tidy
+// and the thing people run is what Windows expects.
+function crlfWindowsScripts(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== 'node_modules') crlfWindowsScripts(full);
+    } else if (/\.(bat|cmd|vbs)$/i.test(entry.name)) {
+      const text = fs.readFileSync(full, 'utf8');
+      fs.writeFileSync(full, text.replace(/\r?\n/g, '\r\n'));
+    }
+  }
 }
 
 // ────────────────────────────────────────────────────────── writing the ZIP
