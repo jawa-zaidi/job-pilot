@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobPilot — offline</title>
+<meta name="theme-color" content="#161b22">
+<link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+<!-- Deliberately self-contained: this page is the last thing standing when the
+     network is gone, so it must not depend on styles.css loading. Colours are
+     copied from :root in styles.css. -->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root { --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2a3240; --text:#e6edf3; --muted:#8b98a9; --accent:#4f8cff; --accent2:#7c5cff; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .card { width: min(440px, 100%); background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px 28px; text-align: center; }
+  .logo { font-size: 20px; font-weight: 700; letter-spacing: .3px; margin-bottom: 18px; }
+  .logo span { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  h1 { font-size: 18px; margin-bottom: 8px; }
+  p { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  .note { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; font-size: 12.5px; color: var(--muted); text-align: left; margin: 16px 0 18px; line-height: 1.6; }
+  .btn { border: none; border-radius: 8px; padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity .15s; background: linear-gradient(90deg, var(--accent), var(--accent2)); color: #fff; }
+  .btn:hover { opacity: .87; }
+  .status { font-size: 11.5px; color: var(--muted); margin-top: 14px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">✈️ <span>JobPilot</span></div>
+    <h1>You're offline</h1>
+    <p>JobPilot can't reach its server right now.</p>
+    <div class="note">
+      Nothing was lost. Your CV, jobs and applications live on the JobPilot
+      server — they'll be exactly where you left them once you're back on the
+      network. No searches, applications or follow-ups run while you're offline.
+    </div>
+    <button class="btn" id="retry">Try again</button>
+    <div class="status" id="status">Waiting for a connection…</div>
+  </div>
+<script>
+  var status = document.getElementById('status');
+  function paint() {
+    // navigator.onLine only means "has a network" — the server itself can still
+    // be down, so we never auto-reload on load, only when the OS tells us the
+    // connection actually came back.
+    status.textContent = navigator.onLine
+      ? 'Network looks fine — the JobPilot server may not be running.'
+      : 'Waiting for a connection…';
+  }
+  document.getElementById('retry').addEventListener('click', function () { location.replace('/'); });
+  window.addEventListener('online', function () {
+    status.textContent = 'Connection is back — reloading…';
+    setTimeout(function () { location.replace('/'); }, 600);
+  });
+  window.addEventListener('offline', paint);
+  paint();
+</script>
+</body>
+</html>
