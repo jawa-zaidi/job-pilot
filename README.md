@@ -30,15 +30,26 @@ Changing your answer re-routes everything already written, both ways, straight a
 
 ## Install — double-click, no terminal
 
-You need [Node.js](https://nodejs.org) on the computer. If it isn't there, JobPilot opens the
-download page for you and tells you what to do — you never have to go looking.
+There are two ways in, and they need different things:
+
+- **A release download** (`JobPilot-Mac-AppleSilicon.zip`, `JobPilot-Mac-Intel.zip`,
+  `JobPilot-Windows.zip` on the [releases page](https://github.com/jawa-zaidi/job-pilot/releases/latest))
+  has a Node runtime and every dependency inside it. Nothing to install, no admin password, and
+  the first run works with the network off. About 55 MB.
+- **The source** — this repository, as a ZIP or a `git clone` — needs [Node.js](https://nodejs.org)
+  on the computer. If it isn't there, JobPilot opens the download page for you and tells you what
+  to do, so you never have to go looking.
+
+Either way the steps below are the same; a release download simply skips the Node.js part.
 
 ### macOS
 
-1. Download the JobPilot ZIP from GitHub: open
-   [the project page](https://github.com/jawa-zaidi/job-pilot), press the green **Code**
-   button, choose **Download ZIP**.
-2. Double-click the downloaded ZIP to unpack it, then open the `job-pilot` folder inside.
+1. Download the ZIP for your Mac from the
+   [releases page](https://github.com/jawa-zaidi/job-pilot/releases/latest) — Apple menu →
+   *About This Mac* says which you want: **Apple M1/M2/M3/M4** is Apple Silicon, anything saying
+   **Intel** is Intel. (No release yet? Take the source instead: press the green **Code** button
+   on [the project page](https://github.com/jawa-zaidi/job-pilot) and choose **Download ZIP**.)
+2. Double-click the downloaded ZIP to unpack it, then open the folder inside.
 3. **Right-click `JobPilot.command` → Open → Open.**
 
    > Do not just double-click it the first time. macOS will say *"cannot be opened because it
@@ -46,9 +57,10 @@ download page for you and tells you what to do — you never have to go looking.
    > isn't. Right-click → Open is the way past it, and you only ever have to do it **once**.
    > (There is no way around this without a paid Apple signing certificate, which this
    > project doesn't have.)
-4. A Terminal window appears and does everything itself: gets the parts it needs (about a
-   minute, first time only) and opens JobPilot in its own Chrome window. **Leave that window
-   open** — it is the app running. Ctrl+C in it quits JobPilot.
+4. A Terminal window appears and does everything itself, then opens JobPilot in its own Chrome
+   window. From a release download that takes a couple of seconds, because everything it needs
+   came in the ZIP; from the source it first fetches the parts it needs, about a minute, first
+   time only. **Leave that window open** — it is the app running. Ctrl+C in it quits JobPilot.
 5. From then on there is a **`JobPilot.app`** in the same folder, created automatically on
    that first run. Double-click that instead and there's no Terminal window at all. You can
    drag it into your Applications folder.
@@ -58,7 +70,10 @@ download page for you and tells you what to do — you never have to go looking.
 > Honest warning: this path has been written carefully but **has never been run on a real
 > Windows machine**. See *Status / known gaps* at the bottom.
 
-1. Download the ZIP the same way, right-click it → **Extract All**.
+1. Download `JobPilot-Windows.zip` from the
+   [releases page](https://github.com/jawa-zaidi/job-pilot/releases/latest), right-click it →
+   **Extract All**. (That step matters: Windows otherwise shows you the inside of the ZIP as if
+   it were a normal folder, and nothing runs properly from there.)
 2. Open the extracted folder.
 3. Double-click **`JobPilot.bat`**.
 4. A window appears and does the rest: gets what it needs, then opens JobPilot in its own
@@ -366,8 +381,11 @@ fully tested end to end.
 - **The Windows install path has never been run on real Windows.** `JobPilot.bat`,
   `install\preflight.bat` and the Desktop / Start Menu shortcut script were written and
   reviewed line by line, but no one has double-clicked them on an actual Windows machine.
-  Expect to hit something. The macOS path has been run repeatedly, including from folders with
-  spaces and brackets in the name, and with Node.js deliberately missing.
+  `JobPilot-Windows.zip` is built by the same script as the Mac ones and its contents were
+  checked file by file, but it has not been unzipped on Windows either. Expect to hit
+  something. The macOS path has been run repeatedly, including from folders with spaces and
+  brackets in the name, with Node.js deliberately missing, and — for the release build — from
+  a fresh unzip with the runtime quarantined and no Node.js on the machine at all.
 - **No real Gmail send has been done.** Saving your Gmail details, the "send myself a test"
   button and the failure messages have been exercised; an actual application email leaving an
   actual inbox has not. The same code sent mail before this revamp, but treat your first send
@@ -422,14 +440,88 @@ fully tested end to end.
   router, a service worker and a web manifest
 - `install/` — the shared launcher (`launch.js`) behind every way of starting the app, the
   Node.js finder, the macOS `.app` generator and the Windows shortcut scripts
-- `scripts/` — `generate-icons.js` (every app icon) and `generate-social-card.js` (the 1200×630
-  link preview), both from scratch with Node built-ins only, no image library
+- `scripts/` — `build-release.js` (the platform downloads, below), `generate-icons.js` (every
+  app icon) and `generate-social-card.js` (the 1200×630 link preview), all from scratch with
+  Node built-ins only: no image library, no zip command, no dependencies
 - `site/` + `netlify.toml` — the public landing page and its Netlify config; `site/` is the
   publish root and makes no external requests
 - `test/smoke.test.js` — `npm test`, the mock-mode smoke suite (no keys and no network needed)
 
 Scripts: `npm start` (server only), `npm run launch` (the full launcher), `npm run make-app`
 (regenerate `JobPilot.app` on macOS), `npm test`.
+
+## Cutting a release
+
+The downloads on the website are built, not committed. Three commands, about five minutes.
+
+**1. Build the ZIPs.**
+
+```bash
+node scripts/build-release.js          # all platforms
+node scripts/build-release.js mac-arm64   # or just one: mac-arm64, mac-x64, windows-x64, linux-x64
+```
+
+It downloads the official Node runtime for each platform from nodejs.org, checks it against
+nodejs.org's own `SHASUMS256.txt` and **stops if that does not match**, installs dependencies
+once with `npm ci --omit=dev`, and writes one ZIP per platform into `build/dist`:
+
+| File | Platform | Size |
+| --- | --- | --- |
+| `JobPilot-Mac-AppleSilicon.zip` | Macs with M1/M2/M3/M4 | ~56 MB |
+| `JobPilot-Mac-Intel.zip` | Intel Macs | ~57 MB |
+| `JobPilot-Windows.zip` | Windows 10/11, 64-bit | ~52 MB |
+| `JobPilot-Linux.zip` | Linux x64 | ~62 MB |
+
+Nothing under `build/` is committed — it is gitignored, and it is hundreds of megabytes of
+other people's binaries. Downloads are cached there, so a second run is quick and offline.
+
+**2. Publish them.** Tag the commit, draft a GitHub Release, and upload the ZIPs from
+`build/dist` as its assets. Keep the file names exactly as built: the website's links are
+`releases/latest/download/<that name>`, so a renamed asset is a broken button.
+
+```bash
+git tag -a v0.1.0 -m "JobPilot 0.1.0" && git push origin v0.1.0
+gh release create v0.1.0 build/dist/*.zip --title "JobPilot 0.1.0" --notes "…"
+```
+
+**3. Point the site at it.** In `site/index.html`, one line:
+
+```js
+const RELEASE_BASE = "https://github.com/jawa-zaidi/job-pilot/releases/latest/download";
+```
+
+That also switches the page's wording from "this needs Node.js" to "nothing to install", so it
+stays honest either way. `releases/latest/download` always resolves to the newest release, so
+later releases need no site change at all. Redeploy `site/`.
+
+**Upgrading the bundled Node.** One constant at the top of `scripts/build-release.js`:
+
+```js
+const NODE_VERSION = 'v22.23.2';
+```
+
+Use an LTS version. After changing it, rebuild and run the test suite on the runtime it
+unpacked, so "it works on the version we ship" is a fact rather than a hope:
+
+```bash
+node scripts/build-release.js mac-arm64
+build/stage/mac-arm64/JobPilot/runtime/bin/node --test test/*.test.js
+```
+
+Node 22 is the current pick because it runs on macOS 11 and later; Node 24 would raise that
+floor to macOS 13.5 and cut off every Mac Apple stopped updating before Ventura.
+
+**What is in a release ZIP:** the app (`server/`, `public/`, `install/`, `package.json`), the
+launcher for that platform, `node_modules` already installed, and `runtime/` — the Node binary,
+downloaded unchanged from nodejs.org. What is *not* in it: `.env`, `data/`, `.git`, `site/`,
+`scripts/`, `test/`. The file list is an allow-list in the build script, so a private file
+cannot get in by being forgotten.
+
+**How a release starts up:** `install/find-node.sh` (and `install/preflight.bat`) look in
+`runtime/` first, clear macOS's quarantine label from the binary, and check it actually runs
+before using it. If it does not — the Intel download on an Apple Silicon Mac, say — they fall
+back to a system Node exactly as before, and if there is none either, they say which file to
+download instead. A `git clone` has no `runtime/` folder, so the developer route is untouched.
 
 ## Roadmap
 
