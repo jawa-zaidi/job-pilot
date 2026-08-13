@@ -39,21 +39,35 @@ panel and makes no request to YouTube at all. If you paste something that isn't
 ID-shaped (a full URL, say) the placeholder stays up rather than the page
 building a broken embed — so a slip is visible, not silently black.
 
-### 2. Change the download link
+### 2. Point the download buttons at a release
 
 ```js
-const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip";
+const RELEASE_BASE = "";
 ```
 
-Both buttons — macOS and Windows — read from this one constant. Today it points
-at GitHub's "download the whole project as a ZIP" link, which is a real working
-download. When there is a proper tagged release build, swap in its URL, e.g.
-`https://github.com/jawa-zaidi/job-pilot/releases/latest/download/JobPilot.zip`.
+There are three buttons — Mac (Apple Silicon), Mac (Intel) and Windows — and
+each takes its file name from `RELEASE_FILES`, which matches what
+`node scripts/build-release.js` writes into `build/dist`. Once a GitHub Release
+exists with those three ZIPs attached, fill in:
 
-The same URL is also written into each button's `href` in the markup as a
-fallback for anyone with JavaScript turned off; the script overwrites those from
-the constant on load, so editing the constant is enough for every normal
-visitor. Update the markup too if you care about the no-JS case.
+```js
+const RELEASE_BASE = "https://github.com/jawa-zaidi/job-pilot/releases/latest/download";
+```
+
+`releases/latest/download` always resolves to the newest release, so this is a
+once-only edit. See "Cutting a release" in the main README for the whole flow.
+
+While `RELEASE_BASE` is empty, all three buttons fall back to `DOWNLOAD_URL` —
+GitHub's "download the whole project as a ZIP" link — and the page swaps in the
+honest wording for it: that copy is the source code and still needs Node.js
+installed. Filling in `RELEASE_BASE` swaps that copy back to "nothing to
+install". The pairs are marked `data-no-release` and `data-release-only` in the
+markup, so no sentence on the page can be true in one state and a lie in the
+other.
+
+The markup ships in the no-release state, hrefs included, which is also what a
+visitor with JavaScript turned off sees. If you fill in `RELEASE_BASE` and care
+about the no-JS case, update the `href`s in the markup too.
 
 ## Deploying to Netlify
 

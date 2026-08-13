@@ -204,6 +204,21 @@ h3 { font-family: var(--font-ui); font-size: 18px; font-weight: 600; letter-spac
 
 .btns { display: flex; flex-wrap: wrap; gap: 12px; }
 
+/* Three platforms rather than two: let them share the row evenly instead of
+   sizing to their text, so no one platform looks like the "real" download and
+   the other two like afterthoughts. */
+.btns--three .btn-dl { flex: 1 1 195px; padding: 14px 16px; }
+.btns--three .btn-dl b { font-size: 15.5px; }
+
+/* The line under the buttons that explains which one is highlighted. Written
+   by the script; it stays hidden if we could not tell what computer this is. */
+.dl-guess { margin-top: 16px; color: var(--ink); font-weight: 500; }
+.dl-unsure { margin-top: 8px; max-width: 62ch; }
+
+/* The page swaps whole sentences depending on whether a release exists yet, so
+   [hidden] has to win against the display rules further up. */
+[hidden] { display: none !important; }
+
 /* ---------------------------------------------------------------------------
  * 4 · Header / footer
  * ------------------------------------------------------------------------ */
@@ -413,6 +428,10 @@ h3 { font-family: var(--font-ui); font-size: 18px; font-weight: 600; letter-spac
   .btns { flex-direction: column; align-items: stretch; }
   .btn { width: 100%; }
   .band .btns { align-items: stretch; }
+
+  /* In a column, flex-basis is a height — without this the three download
+     buttons would each be 240px tall. */
+  .btns--three .btn-dl { flex: 0 0 auto; }
 
   .step { grid-template-columns: 34px 1fr; gap: 14px; }
   .step::before { width: 30px; height: 30px; font-size: 14px; }

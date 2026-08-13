@@ -62,20 +62,36 @@
  */
 const VIDEO_ID = "";
 
-/* 2 · THE DOWNLOAD LINK ─────────────────────────────────────────────────────
+/* 2 · THE DOWNLOAD LINKS ────────────────────────────────────────────────────
  *
- *    Both download buttons — macOS and Windows — point at this one URL.
+ *    ⚠️  NOT SET YET. There is no GitHub Release to point at so far, so this is
+ *    deliberately left empty and the page falls back to DOWNLOAD_URL below.
  *
- *    Right now it is GitHub's "download the whole project as a ZIP" link, which
- *    is a real working download today. When there is a proper tagged release
- *    build, replace this single line with its URL, for example:
- *        https://github.com/jawa-zaidi/job-pilot/releases/latest/download/JobPilot.zip
+ *    To switch the real downloads on:
+ *      1. Run  node scripts/build-release.js  — it writes the three ZIPs named
+ *         in RELEASE_FILES into build/dist.
+ *      2. Draft a release on GitHub and upload those three ZIPs to it.
+ *      3. Put the line below back:
+ *             const RELEASE_BASE = "https://github.com/jawa-zaidi/job-pilot/releases/latest/download";
+ *         "releases/latest/download" always resolves to the newest release, so
+ *         this is a once-only edit — later releases need no change here.
  *
- *    (The same URL is also written into each button's href in the markup, so the
- *    buttons still work if a visitor has JavaScript turned off. The script at the
- *    bottom of this page overwrites those hrefs from this constant on load, so
- *    editing here is enough for every normal visitor.)
+ *    While it is empty, all three buttons hand out DOWNLOAD_URL instead, and the
+ *    page says plainly that this copy still needs Node.js — better than quietly
+ *    promising "nothing to install" and being wrong, or handing anyone a 404.
  */
+const RELEASE_BASE = "";
+
+/* The file names scripts/build-release.js produces. Keep the two in step. */
+const RELEASE_FILES = {
+  "mac-arm64": "JobPilot-Mac-AppleSilicon.zip",
+  "mac-x64":   "JobPilot-Mac-Intel.zip",
+  "windows":   "JobPilot-Windows.zip"
+};
+
+/* The fallback, used until RELEASE_BASE is filled in: GitHub's "download the
+   whole project as a ZIP" link. A real working download, but it is the source
+   code, so it needs Node.js on the computer like the old version did. */
 const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip";
 
 /* ===================== end of the bits you need to edit ================== */
@@ -112,8 +128,12 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
         follow-ups and tells you when someone replies.
       </p>
 
-      <div class="btns" id="download-top">
-        <a class="btn btn--primary btn-dl" data-download
+      <!-- Three downloads, one per kind of computer. The script at the bottom of
+           the page marks the one that matches the visitor, but every option
+           stays visible and spelled out: a wrong guess must never be a dead end,
+           and plenty of people genuinely do not know which Mac they own. -->
+      <div class="btns btns--three" id="download-top">
+        <a class="btn btn--secondary btn-dl" data-download="mac-arm64"
            href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
           <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -121,12 +141,25 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
             <path d="M2 20h20"></path>
           </svg>
           <span>
-            <b>Download for macOS</b>
-            <span>ZIP &middot; then right-click &rarr; Open</span>
+            <b>Mac &mdash; Apple Silicon</b>
+            <span>M1, M2, M3 or M4</span>
           </span>
         </a>
 
-        <a class="btn btn--secondary btn-dl" data-download
+        <a class="btn btn--secondary btn-dl" data-download="mac-x64"
+           href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
+          <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="12" rx="2"></rect>
+            <path d="M2 20h20"></path>
+          </svg>
+          <span>
+            <b>Mac &mdash; Intel</b>
+            <span>Intel chip, pre-2020</span>
+          </span>
+        </a>
+
+        <a class="btn btn--secondary btn-dl" data-download="windows"
            href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
           <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -134,15 +167,28 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
             <path d="M3 12h18M12 4v16"></path>
           </svg>
           <span>
-            <b>Download for Windows</b>
-            <span>ZIP &middot; then run JobPilot.bat</span>
+            <b>Windows</b>
+            <span>Windows 10 or 11, 64-bit</span>
           </span>
         </a>
       </div>
 
-      <p class="note hero-fine">
-        Both buttons download the same file: the JobPilot project as a ZIP. Nothing is installed
-        on your machine by this page &mdash; you unzip the folder and double-click one file inside it.
+      <p class="note dl-guess" data-guess hidden></p>
+
+      <p class="note dl-unsure">
+        <strong>Not sure which Mac you have?</strong> Apple menu &rarr; About This Mac: if it says
+        <em>Apple M1</em> (or M2, M3, M4) pick Apple Silicon, and if it says <em>Intel</em>, pick Intel.
+      </p>
+
+      <p class="note hero-fine" data-release-only hidden>
+        About 55 MB, and everything is inside it &mdash; including the bit that runs it. Nothing is
+        installed on your computer: you unzip a folder and double-click one file in it.
+      </p>
+
+      <p class="note hero-fine" data-no-release>
+        These buttons give you the JobPilot project as a ZIP, which still needs <strong>Node.js</strong>
+        on the computer &mdash; free, and the launcher opens the page for you if it is missing. The
+        ready-to-run downloads, with everything already inside, are on their way.
       </p>
 
       <div class="platform-note">
@@ -308,9 +354,10 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
           <div class="step-body">
             <h3>Download the ZIP and unpack it</h3>
             <p>
-              Use either button above &mdash; they give you the same file. On a Mac, double-click the
-              downloaded ZIP. On Windows, right-click it and choose <span class="kbd">Extract All</span>.
-              Open the folder that appears.
+              Use the button above for your kind of computer. On a Mac, double-click the downloaded
+              ZIP. On Windows, right-click it and choose <span class="kbd">Extract All</span> &mdash;
+              that step matters, because Windows will otherwise show you the inside of the ZIP as if
+              it were a normal folder. Open the folder that appears.
             </p>
           </div>
         </li>
@@ -341,14 +388,20 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
 
         <li class="step">
           <div class="step-body">
-            <h3>Let it set itself up</h3>
+            <h3>A plain window opens, and that's it</h3>
             <p>
-              A plain black window appears and does the rest by itself &mdash; roughly a minute, and only
-              the first time. <strong>Leave that window open:</strong> it is JobPilot running. Closing it,
-              or pressing <span class="kbd">Ctrl</span>+<span class="kbd">C</span> in it, quits the app.
+              A plain black window appears, says where your data folder is, and starts JobPilot &mdash;
+              a couple of seconds, not a couple of minutes. <strong>Leave that window open:</strong> it is
+              JobPilot running. Closing it, or pressing <span class="kbd">Ctrl</span>+<span class="kbd">C</span>
+              in it, quits the app.
             </p>
-            <p>
-              JobPilot needs <strong>Node.js</strong> on the computer &mdash; it is free, and it is the only
+            <p data-release-only hidden>
+              There is nothing to install and nothing to sign up for at this point. The download already
+              contains everything JobPilot needs, including its own copy of the program that runs it, so
+              this step works with the wifi off and never asks for an admin password.
+            </p>
+            <p data-no-release>
+              This copy needs <strong>Node.js</strong> on the computer &mdash; it is free, and it is the only
               thing you have to install separately. If it isn't there, the window tells you so in plain words
               and opens the download page for you, so you never have to go looking. Install it, then
               double-click JobPilot again.
@@ -488,8 +541,11 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
-              <span><b>Node.js, installed once.</b> Free. The launcher checks for it, explains it, and opens
-              the download page if it's missing.</span>
+              <span data-release-only hidden><b>Nothing else to install.</b> The download brings its own
+              copy of Node.js, the free program that runs JobPilot, so there is no second installer and no
+              admin password. If you already have Node.js, JobPilot uses yours instead.</span>
+              <span data-no-release><b>Node.js, installed once.</b> Free. The launcher checks for it, explains
+              it, and opens the download page if it's missing.</span>
             </li>
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
@@ -575,10 +631,10 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
       </div>
 
       <ul class="status-list">
-        <li><b>The Windows path is less tested than the Mac one.</b> The macOS launcher has been run many
-          times, including with Node.js deliberately missing. The Windows launcher and its shortcut scripts
-          were written and reviewed carefully but have not been run on a real Windows machine. Expect to hit
-          something.</li>
+        <li><b>The Windows path is less tested than the Mac one.</b> The Mac download has been unpacked and
+          started from scratch on a machine with no Node.js on it at all, and it worked. The Windows build is
+          made by the same script and reviewed line by line, but it has not been run on a real Windows
+          machine. Expect to hit something.</li>
         <li><b>No real application email has been sent yet.</b> Saving your Gmail details, the test-send button
           and the failure messages all work; an actual application leaving an actual inbox has not been
           watched. Treat your first send as the test.</li>
@@ -608,8 +664,8 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
         Download it, double-click one file, answer five questions. Nothing to sign up for and no key to find.
       </p>
 
-      <div class="btns">
-        <a class="btn btn--primary btn-dl" data-download
+      <div class="btns btns--three">
+        <a class="btn btn--secondary btn-dl" data-download="mac-arm64"
            href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
           <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -617,12 +673,25 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
             <path d="M2 20h20"></path>
           </svg>
           <span>
-            <b>Download for macOS</b>
-            <span>ZIP &middot; then right-click &rarr; Open</span>
+            <b>Mac &mdash; Apple Silicon</b>
+            <span>M1, M2, M3 or M4</span>
           </span>
         </a>
 
-        <a class="btn btn--secondary btn-dl" data-download
+        <a class="btn btn--secondary btn-dl" data-download="mac-x64"
+           href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
+          <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="12" rx="2"></rect>
+            <path d="M2 20h20"></path>
+          </svg>
+          <span>
+            <b>Mac &mdash; Intel</b>
+            <span>Intel chip, pre-2020</span>
+          </span>
+        </a>
+
+        <a class="btn btn--secondary btn-dl" data-download="windows"
            href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
           <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -630,15 +699,21 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
             <path d="M3 12h18M12 4v16"></path>
           </svg>
           <span>
-            <b>Download for Windows</b>
-            <span>ZIP &middot; then run JobPilot.bat</span>
+            <b>Windows</b>
+            <span>Windows 10 or 11, 64-bit</span>
           </span>
         </a>
       </div>
 
+      <p class="note dl-unsure">
+        Not sure which Mac? Apple menu &rarr; About This Mac &mdash; <em>Apple M1/M2/M3/M4</em> means
+        Apple Silicon, <em>Intel</em> means Intel.
+      </p>
+
       <p class="note">
-        Runs on a Mac or Windows computer &middot; needs Node.js once &middot;
-        <a href="https://github.com/jawa-zaidi/job-pilot">source on GitHub</a>
+        <span data-release-only hidden>Runs on a Mac or Windows computer &middot; about 55 MB &middot;
+        nothing to install &middot; </span><span data-no-release>Runs on a Mac or Windows computer
+        &middot; needs Node.js once &middot; </span><a href="https://github.com/jawa-zaidi/job-pilot">source on GitHub</a>
       </p>
     </div>
   </section>
@@ -657,11 +732,14 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
 </footer>
 
 <script>
-/* The only script on the page. It does two small things, both driven by the two
+/* The only script on the page. It does three small things, all driven by the
    constants at the top of this file:
      1 · swaps the video placeholder for a real embed once VIDEO_ID is filled in
-     2 · points every download button at DOWNLOAD_URL
-   With no VIDEO_ID set, the page makes no external request at all. */
+     2 · points each download button at its own release file
+     3 · marks the button that matches the visitor's computer
+   With no VIDEO_ID set, the page makes no external request at all, and nothing
+   here is ever sent anywhere — the guess in step 3 is made and used on this
+   page and nowhere else. */
 (function () {
   "use strict";
 
@@ -684,9 +762,76 @@ const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads
   }
 
   // 2 · The download buttons.
-  if (typeof DOWNLOAD_URL === "string" && DOWNLOAD_URL) {
-    var links = document.querySelectorAll("a[data-download]");
-    for (var i = 0; i < links.length; i++) links[i].href = DOWNLOAD_URL;
+  var base = (typeof RELEASE_BASE === "string" ? RELEASE_BASE : "").trim().replace(/\/+$/, "");
+  var haveRelease = /^https:\/\//.test(base);
+  var buttons = document.querySelectorAll("a[data-download]");
+  var i;
+
+  for (i = 0; i < buttons.length; i++) {
+    var file = RELEASE_FILES[buttons[i].getAttribute("data-download")];
+    buttons[i].href = haveRelease && file ? base + "/" + file : DOWNLOAD_URL;
+  }
+
+  // Copy that would be a lie in one state or the other. The page ships in the
+  // "no release yet" wording, so a visitor with JavaScript off is told the
+  // truth about the file the markup actually links to.
+  function reveal(selector, show) {
+    var found = document.querySelectorAll(selector);
+    for (var n = 0; n < found.length; n++) found[n].hidden = !show;
+  }
+  reveal("[data-release-only]", haveRelease);
+  reveal("[data-no-release]", !haveRelease);
+
+  // 3 · Which computer is this?
+  //
+  // Mac or Windows is easy. Apple Silicon or Intel is not: every Mac browser
+  // reports the same "Intel Mac OS X" user agent whatever the chip, so the one
+  // honest signal left is the name of the graphics chip WebGL reports —
+  // "Apple M2" / "Apple GPU" on Apple Silicon, "Intel"/"AMD"/"Radeon" on the
+  // older machines. If that can't be read, we say Apple Silicon, because that
+  // is what almost every Mac sold since 2020 is.
+  //
+  // It is only ever a highlight. Every button stays visible, stays labelled,
+  // and stays one click away, because this guess can be wrong.
+  function macChip() {
+    try {
+      var canvas = document.createElement("canvas");
+      var gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+      if (!gl) return "";
+      var ext = gl.getExtension("WEBGL_debug_renderer_info");
+      var name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : "";
+      if (/Apple\s*(GPU|M\d)/i.test(name)) return "mac-arm64";
+      if (/Intel|AMD|Radeon|NVIDIA|GeForce/i.test(name)) return "mac-x64";
+    } catch (e) { /* no WebGL, or a browser that refuses to say — fine */ }
+    return "";
+  }
+
+  function guess() {
+    var ua = navigator.userAgent || "";
+    var platform = navigator.platform || "";
+    if (/Win/i.test(platform) || /Windows/i.test(ua)) return "windows";
+    if (/Mac/i.test(platform) || /Mac OS X/i.test(ua)) return macChip() || "mac-arm64";
+    return "";
+  }
+
+  var LIKELY = {
+    "mac-arm64": "This looks like a Mac with Apple Silicon, so that button is highlighted.",
+    "mac-x64": "This looks like a Mac with an Intel chip, so that button is highlighted.",
+    "windows": "This looks like a Windows computer, so that button is highlighted."
+  };
+
+  var picked = guess();
+  if (picked) {
+    for (i = 0; i < buttons.length; i++) {
+      if (buttons[i].getAttribute("data-download") !== picked) continue;
+      buttons[i].classList.remove("btn--secondary");
+      buttons[i].classList.add("btn--primary");
+    }
+    var lines = document.querySelectorAll("[data-guess]");
+    for (i = 0; i < lines.length; i++) {
+      lines[i].textContent = LIKELY[picked];
+      lines[i].hidden = false;
+    }
   }
 })();
 </script>
