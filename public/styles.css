@@ -919,3 +919,28 @@ pre.doc { background: var(--panel2); border: 1px solid var(--border); border-rad
   .jp-ob-card .jp-h1 { font-size: 30px; }
 }
 
+/* ===========================================================================
+ * MY JOBS — the four row lists and the one-job panel.
+ *
+ * Five rules only. Everything else on that screen composes the foundation's
+ * classes as-is; these are the gaps the comp needs that the library had no
+ * equivalent for.
+ * ======================================================================== */
+
+/* "What happens next" draws its numbered rows straight on the page, not inside
+   a card, so they need the card's edge-to-edge treatment without the card. */
+.jp-list--flat > .jp-row { padding-left: 0; padding-right: 0; }
+
+/* The "why we think it fits" tick list, and the colour its ticks and heading
+   take. Default is the green one; the two modifiers step it down. */
+.jp-why { color: var(--good); }
+.jp-why--warn { color: var(--warn); }
+.jp-why--plain { color: var(--ink2); }
+.jp-why-item { display: flex; gap: 10px; padding: 4px 0; font-size: 16px; line-height: 1.5; }
+
+/* An <a> wearing .jp-btn: the global `a:hover` rule would otherwise repaint the
+   label on hover and wash out a primary button. */
+a.jp-btn:hover { color: var(--ink); }
+a.jp-btn--primary:hover { color: var(--surface); }
+a.jp-btn--good:hover { color: var(--good); }
+

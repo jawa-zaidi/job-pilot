@@ -764,6 +764,862 @@ function renderActivity(items) {
 }
 
 /* ===========================================================================
+ * MY JOBS — four row lists, and the slide-over panel for one job.
+ *
+ * The store keeps nine statuses; this screen shows four groups (see COLUMNS at
+ * the top of the file) and never prints a status name at a person. A row opens
+ * the panel, and the panel is the only place a job can be acted on — it carries
+ * every action the old detail drawer had.
+ *
+ * Nothing here polls. It renders from the shared `jobpilot:data` snapshot, and
+ * re-renders only when the markup would actually change, so a background
+ * refresh never steals the scroll position or the sentence being typed.
+ * ======================================================================== */
+
+// ---------- Plain English ----------
+
+// "SW" for Swiggy, "ZR" for Zerodha — the tile at the start of every row.
+function initialsOf(name) {
+  const parts = String(name || '').replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '·';
+  // Two letters always: "Swiggy" → SW, "Postman Labs" → PL.
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+// The match score never reaches a human. It becomes three words.
+function fitWords(a) {
+  const s = a.matchScore || 0;
+  if (s >= 75) return { word: 'strong fit', badge: ' jp-badge--good', card: ' jp-card--good', why: '' };
+  if (s >= 55) return { word: 'good fit', badge: ' jp-badge--warn', card: ' jp-card--warn', why: ' jp-why--warn' };
+  return { word: 'weak fit', badge: '', card: '', why: ' jp-why--plain' };
+}
+
+// "today", "yesterday", "3 days ago", "3 weeks ago" — never a timestamp.
+function agoWords(ts) {
+  if (!ts) return '';
+  const d = Math.floor((Date.now() - ts) / 86400000);
+  if (d <= 0) return 'today';
+  if (d === 1) return 'yesterday';
+  if (d < 14) return `${d} days ago`;
+  return `${Math.round(d / 7)} weeks ago`;
+}
+
+// The same gap said as a length of time: "9 days", "3 weeks".
+function spanWords(ts) {
+  const d = Math.max(0, Math.floor((Date.now() - (ts || Date.now())) / 86400000));
+  if (d < 14) return `${d} day${d === 1 ? '' : 's'}`;
+  return `${Math.round(d / 7)} weeks`;
+}
+
+function nudgeWords(n) {
+  if (!n) return '';
+  return ' · nudged ' + (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`);
+}
+
+// A date that hasn't happened yet, said the way a person would.
+function dayWords(ts) {
+  const days = Math.round((ts - Date.now()) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  const d = new Date(ts);
+  if (days < 7) return 'on ' + d.toLocaleDateString(undefined, { weekday: 'long' });
+  return 'on ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+// The right-hand line on a row: what happened, in the fewest true words.
+function jobStateWords(a) {
+  const nudge = nudgeWords((a.followups || []).length);
+  switch (a.status) {
+    case 'action':     return a.recipientEmail && sendsHerself() ? 'yours to send' : 'apply on their site';
+    case 'discovered': return `found ${agoWords(a.createdAt)}`;
+    case 'approved':   return 'we write it next';
+    case 'ready':      return 'ready to send';
+    case 'applied':
+    case 'followup':   return a.appliedAt ? `sent ${agoWords(a.appliedAt)}${nudge}` : 'ready to send';
+    case 'replied':    return 'they replied';
+    case 'interview':  return 'they want to meet you';
+    case 'offer':      return 'they offered you the job';
+    case 'rejected':   return 'they said no';
+    case 'closed':     return a.appliedAt ? `no reply after ${spanWords(a.appliedAt)}` : 'closed';
+    default:           return '';
+  }
+}
+
+// The one line at the top of the open panel.
+const PANEL_STATE_WORDS = {
+  action: 'Waiting on you',
+  discovered: 'We found this for you',
+  approved: 'We write it next',
+  ready: 'Ready to send',
+  applied: 'Waiting to hear back',
+  followup: 'Waiting to hear back',
+  replied: 'They replied',
+  interview: 'They want to meet you',
+  offer: 'They offered you the job',
+  rejected: 'They said no',
+  closed: 'No reply'
+};
+
+// Where we found it, without naming a scraper.
+function sourceWords(src) {
+  const s = String(src || '');
+  if (!s) return '';
+  if (/career page/i.test(s)) return 'found on their own careers page';
+  if (/linkedin/i.test(s)) return 'found on LinkedIn';
+  if (/remotive|remoteok|arbeitnow/i.test(s)) return 'found on a free job board';
+  return `found on ${s}`;
+}
+
+// ---------- The four buckets ----------
+
+// Every job goes in exactly one bucket. An unrecognised status lands in
+// "We're waiting" rather than disappearing off the screen.
+function bucketise(apps) {
+  const cols = COLUMNS.map(c => ({ ...c, rows: [] }));
+  for (const a of apps || []) {
+    const i = COLUMNS.findIndex(c => c.statuses.includes(a.status));
+    cols[i === -1 ? WAITING_BUCKET : i].rows.push(a);
+  }
+  return cols;
+}
+
+function bucketNote(col, n) {
+  const jobs = `${n} job${n === 1 ? '' : 's'}`;
+  if (col.id === 'needsyou') return `${jobs} · about ${Math.max(2, Math.round(n * 1.5))} minutes`;
+  if (col.id === 'waiting') return `${jobs} · nothing for you to do`;
+  return jobs;
+}
+
+// ---------- The screen ----------
+
+function jobRowHtml(a) {
+  const fit = fitWords(a);
+  const where = [a.company, a.location].filter(Boolean).join(' · ');
+  return `
+    <div class="jp-row jp-row--tap" data-job="${esc(a.id)}" role="button" tabindex="0">
+      <span class="jp-avatar jp-avatar--sm">${esc(initialsOf(a.company))}</span>
+      <div class="jp-row-main">
+        <div class="jp-row-title jp-row-title--light">${esc(a.title)}</div>
+        <div class="jp-row-sub jp-row-sub--sm">${esc(where)}</div>
+      </div>
+      <span class="jp-row-meta">${esc(jobStateWords(a))}</span>
+      <span class="jp-badge${fit.badge}">${fit.word}</span>
+    </div>`;
+}
+
+function jobsSkeletonHtml() {
+  const row = `
+    <div class="jp-skel-row">
+      <div class="jp-skel jp-skel--avatar"></div>
+      <div class="jp-skel-body"><div class="jp-skel jp-skel--title"></div><div class="jp-skel jp-skel--text"></div></div>
+      <div class="jp-skel jp-skel--pill"></div>
+    </div>`;
+  return `
+    <div class="jp-page">
+      <h1 class="jp-title">My jobs</h1>
+      <p class="jp-lede" style="margin:6px 0 26px">Everything JobPilot has found for you, in plain English.</p>
+      <div class="jp-loading" style="margin-bottom:14px"><span class="jp-dot jp-dot--live"></span> Getting your jobs…</div>
+      <div class="jp-card jp-card--flush">${row.repeat(3)}</div>
+    </div>`;
+}
+
+function jobsEmptyHtml() {
+  return `
+    <div class="jp-page">
+      <h1 class="jp-title">My jobs</h1>
+      <p class="jp-lede" style="margin:6px 0 26px">Everything JobPilot finds for you will live here.</p>
+      <div class="jp-empty">
+        <div class="jp-empty-icon">✈</div>
+        <h2 class="jp-h2">Nothing here yet — that's normal</h2>
+        <p class="jp-lede">Your first search takes about a minute. We'll look at company career
+          pages and free job boards, then show you what fits.</p>
+        <button class="jp-btn jp-btn--primary" id="jobsFindFirst">Find my first jobs</button>
+        <p class="jp-note jp-note--center" style="margin-top:16px">Nothing goes to a company until you say so.</p>
+      </div>
+    </div>`;
+}
+
+function jobsScreenHtml(data) {
+  const apps = data.applications || [];
+  if (!apps.length) return jobsEmptyHtml();
+
+  const sent = data.stats ? data.stats.applied : 0;
+  const sentLine = sent ? ` ${sent} sent so far.` : ' Nothing sent yet.';
+  const running = data.currentRun && data.currentRun.activeOp === 'fetching'
+    ? '<div class="jp-loading" style="margin-bottom:18px"><span class="jp-dot jp-dot--live"></span> Looking for more jobs for you right now…</div>'
+    : '';
+
+  const groups = bucketise(apps).filter(col => col.rows.length).map(col => {
+    // The old board's bulk "✓ all applied" lives on the group it belongs to.
+    // Say "sent" when the person is the one emailing them, "applied" when the
+    // company only takes applications on its own form.
+    const allByEmail = col.rows.every(a => a.recipientEmail) && sendsHerself(data);
+    const bulk = col.id === 'needsyou' && col.rows.length > 1
+      ? `<button class="jp-btn jp-btn--secondary jp-btn--xs jp-spacer" id="jobsAllApplied">${allByEmail
+        ? "I've sent all of these" : "I've applied to all of these"}</button>`
+      : '';
+    return `
+      <div style="margin-bottom:26px">
+        <div class="jp-row-flex" style="gap:10px;margin-bottom:10px">
+          <span class="jp-dot ${col.dot}"></span>
+          <h2 class="jp-h-sans">${col.label}</h2>
+          <span class="jp-muted" style="font-size:15px">${bucketNote(col, col.rows.length)}</span>
+          ${bulk}
+        </div>
+        <div class="jp-card jp-card--flush">
+          <div class="jp-list">${col.rows.map(jobRowHtml).join('')}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="jp-page">
+      <h1 class="jp-title">My jobs</h1>
+      <p class="jp-lede" style="margin:6px 0 26px">Everything JobPilot has found for you, in plain English.${sentLine}</p>
+      ${running}
+      ${groups}
+      <p class="jp-note jp-note--center">Open any job to read what we wrote, or to tell us what happened.</p>
+    </div>`;
+}
+
+let jobsHtmlShowing = null; // skip the re-render when nothing actually changed
+
+function renderJobsScreen() {
+  const mount = JobPilot.mount('jobs');
+  if (!mount) return;
+  const html = JobPilot.data ? jobsScreenHtml(JobPilot.data) : jobsSkeletonHtml();
+  if (html === jobsHtmlShowing) return;
+  jobsHtmlShowing = html;
+  mount.innerHTML = html;
+  mount.querySelector('#jobsFindFirst')?.addEventListener('click', e => findJobsNow(e.currentTarget));
+  mount.querySelector('#jobsAllApplied')?.addEventListener('click', markAllApplied);
+}
+
+// The empty state's one button — the same endpoint the big Find button uses.
+async function findJobsNow(btn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="jp-spinner"></span>Looking…';
+  try {
+    const r = await api('/api/batch/fetch', { method: 'POST', body: {} });
+    state.lastRunCost = r.cost; state.lastRunLabel = 'find';
+    if (r.reason) toast(r.reason, true);
+    else if (r.added) toast(`Found ${r.added} jobs that suit you — have a look through them.` + costSuffix(r.cost));
+    else toast('Nothing new that suits you right now. Try again later, or widen what you are looking for in Settings.' + costSuffix(r.cost));
+    await refresh();
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false;
+  btn.textContent = label;
+}
+
+// Bulk confirm for the "Needs you" group — carried over from the old board.
+async function markAllApplied() {
+  const waiting = state.applications.filter(a => a.status === 'action');
+  const n = waiting.length;
+  const allByEmail = n > 0 && waiting.every(a => a.recipientEmail) && sendsHerself();
+  if (!confirm((allByEmail
+    ? `Tell us you have sent all ${n} of these?\n\n`
+    : `Tell us you have applied to all ${n} of these on the companies' own sites?\n\n`)
+    + 'Only say yes if you really have — we start reminding you to chase them up from here.')) return;
+  try {
+    const r = await api('/api/applications/mark-all-applied', { method: 'POST' });
+    // You applied to these yourself, so the nudges are yours too — we remind.
+    toast(`${r.applied} job${r.applied === 1 ? '' : 's'} moved across — we'll remind you to nudge them on day 3, 5 and 10.`);
+    refresh();
+  } catch (err) { toast(err.message, true); }
+}
+
+// A row opens the panel. Delegated, so a re-render never loses the handler.
+document.addEventListener('click', e => {
+  const row = e.target.closest('#mount-jobs [data-job]');
+  if (row) openDrawer(row.dataset.job);
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const row = e.target.closest && e.target.closest('#mount-jobs [data-job]');
+  if (!row) return;
+  e.preventDefault();
+  openDrawer(row.dataset.job);
+});
+
+JobPilot.screens.register('jobs', { onEnter: renderJobsScreen });
+document.addEventListener('jobpilot:data', renderJobsScreen);
+
+/* ---------------------------------------------------------------------------
+ * The panel — one job, in full. Every action the old drawer had lives here.
+ * ------------------------------------------------------------------------ */
+
+let panelHtmlShowing = null;
+let jobPanelDownOnScrim = false;
+
+function openDrawer(id) {
+  const a = state.applications.find(x => x.id === id);
+  if (!a) return;
+  state.openId = id;
+  panelHtmlShowing = null;
+  renderDrawer(a);
+  $('#jobPanel').classList.remove('jp-hidden');
+  // Always open at the top, even if the last job was read to the bottom.
+  const box = document.querySelector('#jobPanel .jp-panel');
+  if (box) box.scrollTop = 0;
+  document.body.style.overflow = 'hidden'; // the page behind must not scroll
+  $('#jobPanelClose')?.focus();
+}
+
+function closeDrawer() {
+  state.openId = null;
+  panelHtmlShowing = null;
+  $('#jobPanel')?.classList.add('jp-hidden');
+  document.body.style.overflow = '';
+}
+
+// Why we think it fits — the reasons the AI gave, as a tick list.
+function whyFitHtml(a) {
+  const fit = fitWords(a);
+  const reasons = (a.matchReasons || []).filter(Boolean).slice(0, 6);
+  if (!reasons.length) return '';
+  const weak = fit.why === ' jp-why--plain';
+  const head = !fit.why ? "A strong fit — here's why we think so"
+    : fit.why === ' jp-why--warn' ? "A good fit — here's why we think so"
+      : "Not a perfect fit — here's what we found";
+  // A tick on "they want experience you do not have" would be a lie, so the
+  // weak list gets a plain bullet.
+  const mark = weak ? '·' : '✓';
+  return `
+    <div class="jp-card${fit.card}" style="margin-bottom:20px">
+      <div class="jp-h-sans--sm jp-why${fit.why}" style="margin-bottom:8px">${head}</div>
+      ${reasons.map(r => `<div class="jp-why-item"><span class="jp-why${fit.why}">${mark}</span><span>${esc(r)}</span></div>`).join('')}
+    </div>`;
+}
+
+// The one card that says what to do next, if anything.
+function actionCardHtml(a) {
+  const t = a.tailored;
+  const reply = a.replied && a.replied.summary
+    ? `<div class="jp-card jp-card--good" style="margin-bottom:20px">
+         <span class="jp-eyebrow jp-eyebrow--good">They wrote back</span>
+         <p style="margin-top:8px">${esc(a.replied.summary)}</p>
+       </div>`
+    : '';
+
+  // Yours to send: either the company only takes applications on its own site,
+  // or the person told us they press send. Both end in the same honest place —
+  // we prepare it, they send it, and nothing is recorded until they say so.
+  const yoursToSend = a.status === 'action' || (sendsHerself() && t && !a.appliedAt && !a.applicationSent);
+  if (yoursToSend) {
+    const byEmail = !!a.recipientEmail;   // there IS somebody to write to
+    // A prefilled draft in their own mail app is the shortest honest route from
+    // "written" to "sent". The CV cannot ride along in a link, so we say so.
+    const mailto = byEmail && t
+      ? `mailto:${encodeURIComponent(a.recipientEmail)}?subject=${encodeURIComponent(t.email_subject || '')}&body=${encodeURIComponent(t.email_body || '')}`
+      : '';
+    const head = byEmail
+      ? `This one is yours to send to ${esc(a.company)}`
+      : `${esc(a.company)} only take applications on their own site`;
+    const lede = byEmail
+      ? (t
+        ? `You send your own applications, so we have written it and left it here. Open it in your email, attach the CV below, and tell us once it has gone — we start the reminders from then.`
+        : 'You send your own applications. Write it first, then it is ready to go whenever you are.')
+      : (t
+        ? "Everything is ready. Open their form, upload the CV we wrote, paste the message, then tell us you have done it — we keep track from there and tell you when it's time to nudge them."
+        : "Open their form and apply, then tell us you have done it — we keep track from there and tell you when it's time to nudge them.");
+    const openBtn = byEmail
+      ? (mailto ? `<a class="jp-btn jp-btn--primary jp-btn--sm" href="${esc(mailto)}">Open it in your email</a>` : '')
+      : (a.url ? `<a class="jp-btn jp-btn--primary jp-btn--sm" href="${esc(a.url)}" target="_blank" rel="noopener">Open their form</a>` : '');
+    return reply + `
+      <div class="jp-card jp-card--accent" style="margin-bottom:22px">
+        <span class="jp-eyebrow jp-eyebrow--accent">Your turn</span>
+        <div class="jp-h-sans" style="margin:6px 0">${head}</div>
+        <p class="jp-lede" style="margin-bottom:16px">${lede}</p>
+        <div class="jp-btns">
+          ${openBtn}
+          ${t ? `<a class="jp-btn jp-btn--quiet jp-btn--sm" href="/api/applications/${esc(a.id)}/cv.pdf">Download my CV (PDF)</a>` : ''}
+          ${t ? '<button class="jp-btn jp-btn--quiet jp-btn--sm" id="jobCopyMsg">Copy the message</button>' : ''}
+          ${t ? '<button class="jp-btn jp-btn--quiet jp-btn--sm" id="jobCopyCv">Copy the CV text</button>' : ''}
+          ${t ? '' : '<button class="jp-btn jp-btn--quiet jp-btn--sm" id="jobWriteBtn">Write my CV and message</button>'}
+          ${byEmail && !a.url ? '' : (byEmail && a.url ? `<a class="jp-btn jp-btn--quiet jp-btn--sm" href="${esc(a.url)}" target="_blank" rel="noopener">Read the advert</a>` : '')}
+        </div>
+        <button class="jp-btn jp-btn--good jp-btn--block jp-btn--sm" id="jobAppliedBtn" style="margin-top:12px">${byEmail
+          ? "I've sent it — start tracking it" : "I've applied — start tracking it"}</button>
+      </div>`;
+  }
+
+  if (!t && !a.appliedAt) {
+    return reply + `
+      <div class="jp-card jp-card--accent" style="margin-bottom:22px">
+        <span class="jp-eyebrow jp-eyebrow--accent">Next</span>
+        <div class="jp-h-sans" style="margin:6px 0">We haven't written your application yet</div>
+        <p class="jp-lede" style="margin-bottom:16px">We rewrite your CV for this one job and draft a short message to go
+          with it. Nothing invented — only what is already in your real CV.</p>
+        <div class="jp-btns">
+          <button class="jp-btn jp-btn--primary jp-btn--sm" id="jobWriteBtn">Write my CV and message</button>
+          ${a.url ? `<a class="jp-btn jp-btn--quiet jp-btn--sm" href="${esc(a.url)}" target="_blank" rel="noopener">Read the advert</a>` : ''}
+        </div>
+      </div>`;
+  }
+
+  if (t && !a.applicationSent && !a.appliedAt) {
+    return reply + `
+      <div class="jp-card jp-card--accent" style="margin-bottom:22px">
+        <span class="jp-eyebrow jp-eyebrow--accent">Ready</span>
+        <div class="jp-h-sans" style="margin:6px 0">Your application is written and ready</div>
+        <p class="jp-lede" style="margin-bottom:16px">${a.recipientEmail
+      ? `We'll email it to ${esc(a.recipientEmail)} with your CV attached as a PDF, then chase it up on day 3, 5 and 10.`
+      : 'Add an address below and we can send it for you, or apply on their own site and tell us you have done it.'}</p>
+        <div class="jp-btns">
+          <button class="jp-btn jp-btn--primary jp-btn--sm" id="jobSendBtn">Send it now</button>
+          <a class="jp-btn jp-btn--quiet jp-btn--sm" href="/api/applications/${esc(a.id)}/cv.pdf">Download my CV (PDF)</a>
+          <button class="jp-btn jp-btn--quiet jp-btn--sm" id="jobAppliedBtn">I applied myself — track it</button>
+          <button class="jp-btn jp-btn--quiet jp-btn--sm" id="jobWriteBtn">Write it again</button>
+        </div>
+      </div>`;
+  }
+
+  // Already sent: the draft is still there to re-read, re-write or download.
+  // Once a job is over, none of that is worth offering.
+  const over = ['rejected', 'closed'].includes(a.status);
+  return reply + (t && !over ? `
+      <div class="jp-btns" style="margin-bottom:22px">
+        <button class="jp-btn jp-btn--quiet jp-btn--sm" id="jobWriteBtn">Write it again</button>
+        <a class="jp-btn jp-btn--quiet jp-btn--sm" href="/api/applications/${esc(a.id)}/cv.pdf">Download my CV (PDF)</a>
+      </div>` : '');
+}
+
+function applicationSentWords(a) {
+  const s = a.applicationSent;
+  if (!s) return `You applied ${agoWords(a.appliedAt)}`;
+  if (s.manual) return `You did it yourself, ${agoWords(s.at)}`;
+  if (s.simulated) return `${agoWords(s.at)} — a practice run, so nothing really left this computer`;
+  return `${agoWords(s.at)} → ${esc(s.to || 'them')}`;
+}
+
+// "What happens next": the real follow-up plan, with the real dates, and an
+// "I've done it" button on anything due that has to be done by hand.
+function nextStepsHtml(a) {
+  const step = (tone, mark, title, sub, end = '') => `
+    <div class="jp-row jp-row--top">
+      <span class="jp-avatar jp-avatar--xs jp-avatar--round${tone ? ' jp-avatar--' + tone : ''}">${mark}</span>
+      <div class="jp-row-main">
+        <div class="jp-row-title jp-row-title--light">${title}</div>
+        <div class="jp-row-sub jp-row-sub--sm">${sub}</div>
+      </div>
+      ${end ? `<div class="jp-row-end">${end}</div>` : ''}
+    </div>`;
+
+  const rows = [];
+  const stopped = !!a.replied || ['replied', 'interview', 'offer', 'rejected', 'closed'].includes(a.status);
+  // Not "is there an address" — "will JobPilot actually be the one emailing".
+  // Those came apart the moment somebody chose to send their own applications.
+  const byEmail = chasedByUs(a);
+  const mine = sendsHerself();
+
+  if (!a.appliedAt) {
+    const yours = mine || a.status === 'action';
+    rows.push(yours
+      ? step('accent', '1',
+        a.recipientEmail && mine ? 'You send it' : 'You apply on their site',
+        a.recipientEmail && mine
+          ? `The message and your CV are written — send it to ${esc(a.recipientEmail)} whenever suits you`
+          : 'Two minutes with the CV and the message above')
+      : step('accent', '1', a.recipientEmail ? 'We email it for you' : 'You send it, or we do',
+        a.recipientEmail ? `Straight to ${esc(a.recipientEmail)}, with your CV attached as a PDF`
+          : 'Add an address below and we send it — otherwise you apply on their own site'));
+    rows.push(yours
+      ? step('', '2', 'We remind you on day 3, 5 and 10', 'A line here each time, so nothing goes quiet by accident')
+      : step('', '2', 'We remind them on day 3, 5 and 10', 'Politely, and we stop the moment somebody replies'));
+    rows.push(step('', '3', 'We watch for a reply', 'Anything that comes back shows up here, in plain words'));
+  } else {
+    rows.push(step('good', '✓',
+      a.applicationSent && a.applicationSent.manual ? 'You applied on their site' : 'Your application went out',
+      applicationSentWords(a)));
+    let n = 1;
+    for (const day of [3, 5, 10]) {
+      n++;
+      const done = (a.followups || []).find(f => f.day === day);
+      const due = a.appliedAt + day * 86400000;
+      if (done) {
+        const how = done.manual ? 'you did this one yourself'
+          : done.simulated ? 'a practice run, so nothing really left this computer'
+            : `sent to ${esc(done.to || 'them')}`;
+        const letter = done.email ? `
+          <details style="margin-top:8px">
+            <summary style="cursor:pointer;font-size:14px;color:var(--accent)">Read what we sent</summary>
+            <div class="jp-doc jp-doc--sm jp-doc--scroll" style="margin-top:8px">${esc(done.email.subject || '')}\n\n${esc(done.email.body || '')}</div>
+          </details>` : '';
+        rows.push(step('good', String(n), `We nudged them on day ${day}`, `${agoWords(done.sentAt)} · ${how}${letter}`));
+      } else if (stopped) {
+        rows.push(step('', String(n), `The day ${day} nudge is off`,
+          a.replied ? 'They wrote back, so we stopped chasing' : 'This one is finished, so we stopped chasing'));
+      } else if (Date.now() >= due && !byEmail) {
+        rows.push(step('warn', String(n), `Time to nudge them — day ${day}`,
+          'Message them wherever you applied, then tell us it is done',
+          `<button class="jp-btn jp-btn--good jp-btn--xs jp-fu-done" data-day="${day}">I've done it</button>`));
+      } else if (Date.now() >= due) {
+        rows.push(step('warn', String(n), `The day ${day} nudge is due`, 'It goes out on the next check — nothing for you to do'));
+      } else {
+        rows.push(step('', String(n), `We nudge them on day ${day}`,
+          byEmail ? `${dayWords(due)}, automatically` : `${dayWords(due)} — we'll remind you here`));
+      }
+    }
+    rows.push(step('', String(n + 1), 'We watch for a reply',
+      byEmail ? 'We read your inbox for anything from them and tell you in plain words'
+        : mine ? 'Replies come straight to you. Tell us the moment you hear anything and we stop chasing.'
+          : 'Got an email from them? Paste their address below and we take over the chasing'));
+  }
+
+  return `
+    <h2 class="jp-h-sans" style="margin:26px 0 4px">What happens next</h2>
+    <div class="jp-list jp-list--ruled jp-list--flat">${rows.join('')}</div>`;
+}
+
+function renderDrawer(a) {
+  const t = a.tailored;
+  const where = [a.company, a.location, sourceWords(a.source)].filter(Boolean).join(' · ');
+
+  const check = a.qualityCheck && a.qualityCheck.checked && !a.qualityCheck.ok
+    ? `<div class="jp-card jp-card--warn" style="margin-bottom:20px">
+         <div class="jp-h-sans--sm jp-why--warn" style="margin-bottom:6px">We corrected this draft</div>
+         <p class="jp-note">Checking it against your real CV turned up: ${esc((a.qualityCheck.problems || []).slice(0, 3).join('; '))}. That has been fixed.</p>
+       </div>`
+    : '';
+
+  const contact = a.recruiterName
+    ? `<p class="jp-note" style="margin:-12px 0 18px">Their hiring contact: ${esc(a.recruiterName)}${a.recruiterUrl
+      ? ` · <a href="${esc(a.recruiterUrl)}" target="_blank" rel="noopener">see their profile →</a>` : ''}</p>`
+    : '';
+
+  const letter = t ? `
+    <h2 class="jp-h-sans" style="margin:0 0 6px">The message we wrote</h2>
+    <p class="jp-note" style="margin-bottom:10px">Subject line: ${esc(t.email_subject || '')}</p>
+    <div class="jp-doc">${esc(t.email_body || '')}</div>
+    <div class="jp-row-flex" style="margin:12px 0 26px">
+      <input class="jp-input jp-input--sm" id="jobFixInput" style="flex:1"
+        placeholder="Want it different? e.g. &ldquo;shorter&rdquo;, &ldquo;mention my fintech work&rdquo;">
+      <button class="jp-btn jp-btn--secondary jp-btn--sm" id="jobFixBtn">Rewrite it</button>
+    </div>` : '';
+
+  const keywords = t && (t.keywords_used || []).length
+    ? ` We made sure their own words are in there: ${esc(t.keywords_used.slice(0, 6).join(', '))}.` : '';
+
+  const cv = t ? `
+    <h2 class="jp-h-sans" style="margin:0 0 6px">Your CV for this job</h2>
+    <p class="jp-note" style="margin-bottom:10px">Same facts as your real CV — reordered so the things ${esc(a.company)}
+      asked for come first. Nothing invented; we checked.${keywords}</p>
+    <div class="jp-doc jp-doc--sm jp-doc--scroll">${esc(t.cv || '')}</div>
+    <div class="jp-btns" style="margin-top:12px">
+      <a class="jp-btn jp-btn--quiet jp-btn--sm" href="/api/applications/${esc(a.id)}/cv.pdf">Download my CV (PDF)</a>
+      <button class="jp-btn jp-btn--quiet jp-btn--sm" id="jobCopyCv2">Copy the CV text</button>
+    </div>` : '';
+
+  const stillOpen = !['rejected', 'closed'].includes(a.status);
+
+  const html = `
+    <h1 class="jp-h2">${esc(a.title)}</h1>
+    <p class="jp-lede" style="font-size:17px;margin:6px 0 20px">${esc(where)}${a.url
+      ? ` · <a href="${esc(a.url)}" target="_blank" rel="noopener">read the advert →</a>` : ''}</p>
+    ${contact}
+    ${whyFitHtml(a)}
+    ${check}
+    ${actionCardHtml(a)}
+
+    <label class="jp-field">
+      <span class="jp-field-label">Who to email at the company</span>
+      <input class="jp-input jp-input--sm" type="email" id="jobRecipient" value="${esc(a.recipientEmail || '')}"
+        placeholder="${a.recipientEmail ? 'name@company.com' : 'nobody in the advert — paste an address and we can send it'}">
+      <span class="jp-field-help">With an address here we send the application and every nudge by email, and we
+        read the replies. Leave it empty and you apply on their own site instead.</span>
+    </label>
+
+    ${letter}
+    ${cv}
+    ${nextStepsHtml(a)}
+
+    <h2 class="jp-h-sans" style="margin:26px 0 10px">What the advert says</h2>
+    <div class="jp-doc jp-doc--sm jp-doc--scroll">${esc(a.description || 'The advert came without a description.')}</div>
+
+    ${stillOpen ? `
+      <div class="jp-card jp-card--quiet jp-card--tight" style="margin-top:22px">
+        <div class="jp-row-flex">
+          <div class="jp-row-main">
+            <div class="jp-h-sans--sm">Heard something we haven't?</div>
+            <div class="jp-note">Tell us and we stop chasing this one.</div>
+          </div>
+          <button class="jp-btn jp-btn--secondary jp-btn--xs jp-spacer" id="jobRejectBtn">They said no</button>
+        </div>
+      </div>` : ''}`;
+
+  const stateEl = $('#jobPanelState');
+  if (stateEl) stateEl.textContent = PANEL_STATE_WORDS[a.status] || 'This job';
+  const body = $('#jobPanelBody');
+  if (!body) return;
+
+  // A background refresh must not wipe the sentence somebody is typing.
+  if (html === panelHtmlShowing) return;
+  const draft = $('#jobFixInput') ? $('#jobFixInput').value : '';
+  panelHtmlShowing = html;
+  body.innerHTML = html;
+  if (draft && $('#jobFixInput')) $('#jobFixInput').value = draft;
+
+  bindPanel(a);
+}
+
+function bindPanel(a) {
+  const t = a.tailored;
+
+  $('#jobRecipient')?.addEventListener('change', async e => {
+    try {
+      await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { recipientEmail: e.target.value } });
+      toast(e.target.value.trim()
+        ? 'Saved — we can email this one for you now'
+        : 'Saved — you apply on their own site for this one');
+      await refresh();
+    } catch (err) { toast(err.message, true); }
+  });
+
+  $('#jobWriteBtn')?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="jp-spinner"></span>Writing…';
+    try {
+      await api(`/api/applications/${a.id}/tailor`, { method: 'POST' });
+      toast('Written — have a read below and change anything you like');
+      await refresh();
+    } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = label; }
+  });
+
+  async function runFix() {
+    const feedback = $('#jobFixInput').value.trim();
+    if (!feedback) return toast('Tell us what to change first', true);
+    const btn = $('#jobFixBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="jp-spinner"></span>Rewriting…';
+    try {
+      await api(`/api/applications/${a.id}/tailor`, { method: 'POST', body: { feedback } });
+      panelHtmlShowing = null;
+      $('#jobFixInput').value = ''; // the instruction is spent
+      toast('Rewritten — have a look');
+      await refresh();
+    } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = 'Rewrite it'; }
+  }
+  $('#jobFixBtn')?.addEventListener('click', runFix);
+  $('#jobFixInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') runFix(); });
+
+  $('#jobSendBtn')?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const recipient = ($('#jobRecipient')?.value || '').trim();
+    // Nothing goes out without a person saying yes to this exact sentence, and
+    // nothing is recorded as sent when there is nobody to send it to.
+    if (!recipient) {
+      toast("There's nobody to send this one to yet. Put an address in the box above, or apply on their own site and tell us you've done it.", true);
+      return;
+    }
+    if (!confirm(`Send this application to ${recipient} now, with your CV attached?`)) return;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="jp-spinner"></span>Sending…';
+    try {
+      if (recipient !== (a.recipientEmail || '')) {
+        await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { recipientEmail: recipient } });
+      }
+      const res = await api(`/api/applications/${a.id}/apply`, { method: 'POST' });
+      toast(res.simulated
+        ? "Sent as a practice run, because your email isn't connected yet. We'll still chase it up on day 3, 5 and 10."
+        : `Sent to ${recipient} — we'll chase it up on day 3, 5 and 10.`);
+      await refresh();
+    } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = 'Send it now'; }
+  });
+
+  const copy = async (text, label) => {
+    try { await navigator.clipboard.writeText(text || ''); toast(`${label} copied — paste it into their form`); }
+    catch { toast('That did not copy — select the text below and copy it by hand', true); }
+  };
+  $('#jobCopyCv')?.addEventListener('click', () => copy(t && t.cv, 'Your CV'));
+  $('#jobCopyCv2')?.addEventListener('click', () => copy(t && t.cv, 'Your CV'));
+  $('#jobCopyMsg')?.addEventListener('click', () => copy(t && t.email_body, 'The message'));
+
+  $('#jobAppliedBtn')?.addEventListener('click', async () => {
+    const byEmail = !!a.recipientEmail && sendsHerself();
+    if (!confirm((byEmail
+      ? `Have you sent your application for ${a.title} at ${a.company}?\n\n`
+      : `Have you applied for ${a.title} at ${a.company} on their own site?\n\n`)
+      + "We'll start tracking it and remind you to chase them up.")) return;
+    try {
+      await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { manualApplied: true } });
+      toast("Got it — we're tracking this one now");
+      await refresh();
+    } catch (err) { toast(err.message, true); }
+  });
+
+  for (const btn of document.querySelectorAll('#jobPanelBody .jp-fu-done')) {
+    btn.addEventListener('click', async () => {
+      try {
+        await api(`/api/applications/${a.id}/followup-done`, { method: 'POST', body: { day: Number(btn.dataset.day) } });
+        toast('Noted — that nudge is ticked off');
+        await refresh();
+      } catch (err) { toast(err.message, true); }
+    });
+  }
+
+  $('#jobRejectBtn')?.addEventListener('click', async () => {
+    if (!confirm(`Did ${a.company} turn you down for this one?\n\nWe'll stop chasing it and keep it under Closed.`)) return;
+    try {
+      await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { status: 'rejected' } });
+      toast("Sorry to hear it — we've stopped chasing this one");
+      await refresh();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+// ---------- The panel's own chrome ----------
+
+$('#jobPanelClose')?.addEventListener('click', closeDrawer);
+
+// Only a true backdrop click closes: a drag that starts inside the panel and
+// ends on the scrim (selecting text) must not throw the whole thing away.
+$('#jobPanel')?.addEventListener('mousedown', e => { jobPanelDownOnScrim = e.target.id === 'jobPanel'; });
+$('#jobPanel')?.addEventListener('click', e => {
+  if (jobPanelDownOnScrim && e.target.id === 'jobPanel') closeDrawer();
+  jobPanelDownOnScrim = false;
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && state.openId) { e.preventDefault(); closeDrawer(); }
+});
+
+// "Not interested" — drop the job altogether. The old drawer's Remove.
+$('#jobPanelDrop')?.addEventListener('click', async () => {
+  const a = state.applications.find(x => x.id === state.openId);
+  if (!a) return;
+  if (!confirm(`Take ${a.title} at ${a.company} off your list?\n\n`
+    + (a.appliedAt
+      ? 'You have already applied to this one, so its history goes too.'
+      : "We'll stop tracking it and it won't come back."))) return;
+  try {
+    await api(`/api/applications/${a.id}`, { method: 'DELETE' });
+    closeDrawer();
+    toast("Gone — we won't bring that one up again");
+    refresh();
+  } catch (err) { toast(err.message, true); }
+});
+
+// ---------- Feedback / mode / target ----------
+
+$('#feedbackBtn')?.addEventListener('click', async () => {
+  const text = $('#feedbackInput').value.trim();
+  if (!text) return toast('Write the rule first — one line is plenty.', true);
+  const kind = $('#feedbackKind').value;
+  try {
+    await api('/api/feedback', { method: 'POST', body: { text, kind } });
+    $('#feedbackInput').value = '';
+    const label = { find: 'choosing which jobs to go for', cv: 'writing your CV',
+      email: 'writing the message that goes with it' }[kind];
+    toast(`Saved — we'll follow that from now on when ${label}.`);
+    refresh();
+  } catch (err) { toast(err.message, true); }
+});
+
+$('#modeSelect')?.addEventListener('change', async e => {
+  const mode = e.target.value;
+  if (mode === 'auto' && !confirm('Let JobPilot run on its own?\n\n'
+    + 'It will find jobs, write your applications and send them without stopping to show you first. '
+    + 'If your email is connected, those really do go out.')) {
+    e.target.value = 'manual';
+    return;
+  }
+  await api('/api/settings', { method: 'POST', body: { mode } });
+  toast(mode === 'auto'
+    ? "JobPilot will run rounds on its own from now on, and tell you how each one went."
+    : "You're back in charge — nothing happens until you press the button.");
+  refresh();
+});
+
+
+// ---------- Filters ----------
+
+$('#stageFilter')?.addEventListener('change', e => { filters.stage = e.target.value; renderBoard(); });
+$('#dateFrom')?.addEventListener('change', e => { filters.from = e.target.value; renderBoard(); });
+$('#dateTo')?.addEventListener('change', e => { filters.to = e.target.value; renderBoard(); });
+$('#clearFilters')?.addEventListener('click', () => {
+  filters = { stage: 'all', from: '', to: '' };
+  $('#stageFilter').value = 'all';
+  $('#dateFrom').value = '';
+  $('#dateTo').value = '';
+  renderBoard();
+});
+
+// ---------- Improvement reports ----------
+
+async function openReports() {
+  const r = await api('/api/insights');
+  $('#reportSub').textContent =
+    `Auto-generated every ${r.config.every} applications and after each automated run` +
+    (r.config.email ? `, emailed to ${r.config.email}` : '') +
+    `. ${r.appliedSinceReport} application(s) since the last report.`;
+  $('#reportList').innerHTML = (r.reports || []).map(rep => `
+    <div class="report-item">
+      <div class="r-head">${esc(rep.subject)}</div>
+      <div class="r-sub">${timeAgo(rep.at)} · trigger: ${esc(rep.trigger)}</div>
+      <details><summary style="cursor:pointer;font-size:12px;color:var(--accent)">Read report</summary>
+      <pre class="doc" style="margin-top:8px">${esc(rep.body)}</pre></details>
+    </div>`).join('') || '<p style="color:var(--muted);font-size:13px">No reports yet — apply to some jobs first, or generate one now.</p>';
+  $('#reportOverlay').classList.remove('hidden');
+}
+
+// Close a modal on a true backdrop click only. A plain click handler also fires
+// when a drag STARTS inside the modal (selecting text, sliding over an input)
+// and ends on the backdrop — so require mousedown AND mouseup on the backdrop.
+function bindOverlayClose(overlayId, close) {
+  const el = $('#' + overlayId);
+  if (!el) return;
+  let downOnBackdrop = false;
+  el.addEventListener('mousedown', e => { downOnBackdrop = e.target.id === overlayId; });
+  el.addEventListener('click', e => {
+    if (downOnBackdrop && e.target.id === overlayId) close();
+    downOnBackdrop = false;
+  });
+}
+
+$('#reportBtn')?.addEventListener('click', () => openReports().catch(err => toast(err.message, true)));
+$('#reportClose')?.addEventListener('click', () => $('#reportOverlay').classList.add('hidden'));
+bindOverlayClose('reportOverlay', () => $('#reportOverlay').classList.add('hidden'));
+
+$('#reportRunBtn')?.addEventListener('click', async e => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Analyzing…';
+  try {
+    const r = await api('/api/insights/run', { method: 'POST' });
+    toast(r.emailed ? `Report generated and emailed to ${r.to}` : 'Report generated — read it below (add Gmail in Settings to receive it by email)');
+    await openReports();
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false;
+  btn.textContent = 'Generate report now';
+});
+
+// The old "Edit your profile" window is gone. Its only opener lived inside the
+// hidden pre-revamp dashboard, so nobody could reach it — and everything it did
+// is on the "You" screen, which is reachable from the header and from Settings.
+
+const splitList = (v, sep) => v.split(sep).map(x => x.trim()).filter(Boolean);
+
+// ---------- Collapsible sidebar ----------
+
+function applyNavState() {
+  document.body.classList.toggle('nav-collapsed', localStorage.getItem('jp_nav') === 'closed');
+}
+$('#navToggle')?.addEventListener('click', () => {
+  localStorage.setItem('jp_nav', document.body.classList.contains('nav-collapsed') ? 'open' : 'closed');
+  applyNavState();
+});
+applyNavState();
+
+// The old sidebar's "⚙️ Settings & API keys" button now goes to the Settings
+// screen. The window it used to open is gone — everything it held is on that
+// screen, either in one of the four cards or under "Advanced".
+$('#settingsBtn')?.addEventListener('click', () => JobPilot.screens.go('settings'));
+
+/* ===========================================================================
  * THE WELCOME QUESTIONS — five questions, one per screen.
  *
  * Replaces the old six-step setup wizard. Two deliberate differences:
