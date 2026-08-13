@@ -1,20 +1,171 @@
 // JobPilot dashboard
+//
+// THE FOUR BUCKETS. The store keeps nine internal statuses; nobody outside this
+// file ever needs to know that. Every job lands in exactly one of these four,
+// and the labels are the only names a person ever reads:
+//
+//   Needs you    action                                     — you have to do something
+//   Good news    replied, interview, offer                  — a human answered
+//   We're waiting applied, followup, ready, approved, discovered — nothing to do
+//   Closed       closed, rejected                           — over
+//
+// `color` and `dot` are the group marker (a token, never a hex, so both themes
+// work). Anything with an unrecognised status falls into "We're waiting" rather
+// than vanishing — see bucketise().
 const COLUMNS = [
-  { id: 'discovered', label: 'Discovered', statuses: ['discovered'], color: '#4f8cff' },
-  { id: 'approved',   label: 'Approved',   statuses: ['approved'],   color: '#9d7bff' },
-  { id: 'ready',      label: 'CV Ready',   statuses: ['ready'],      color: '#7c5cff' },
-  { id: 'action',     label: 'Your action ✋', statuses: ['action'],  color: '#e0653c' },
-  { id: 'applied',    label: 'Applied',    statuses: ['applied'],    color: '#3fb96f' },
-  { id: 'followup',   label: 'Follow-up',  statuses: ['followup'],   color: '#e0a53c' },
-  { id: 'replied',    label: 'Replied ⭐',  statuses: ['replied'],    color: '#f2c94c' },
-  { id: 'interview',  label: 'Interview',  statuses: ['interview', 'offer'], color: '#38c6d0' },
-  { id: 'closed',     label: 'Closed',     statuses: ['closed', 'rejected'], color: '#5a6577' }
+  { id: 'needsyou', label: 'Needs you',     statuses: ['action'],
+    color: 'var(--accent)', dot: 'jp-dot--accent' },
+  { id: 'goodnews', label: 'Good news',     statuses: ['replied', 'interview', 'offer'],
+    color: 'var(--good)',   dot: 'jp-dot--good' },
+  { id: 'waiting',  label: "We're waiting", statuses: ['applied', 'followup', 'ready', 'approved', 'discovered'],
+    color: 'var(--ink2)',   dot: '' },
+  { id: 'closed',   label: 'Closed',        statuses: ['closed', 'rejected'],
+    color: 'var(--line)',   dot: 'jp-dot--quiet' }
 ];
+const WAITING_BUCKET = 2; // where an unknown status goes
 
 let state = { applications: [], stats: null, openId: null, settings: null, lastRunCost: null, lastRunLabel: '' };
 let filters = { stage: 'all', from: '', to: '' };
 
 const $ = s => document.querySelector(s);
+
+/* ===========================================================================
+ * APP SHELL — light/dark, the screen router, and the shared data feed.
+ *
+ * Everything a screen needs to plug itself in lives on `window.JobPilot`:
+ *
+ *   JobPilot.screens.register('jobs', { onEnter(el), onLeave(el) })
+ *       Called every time that screen is shown / hidden. `el` is the screen's
+ *       <section>. Register at load time; if the screen is already showing,
+ *       onEnter fires straight away so nothing depends on load order.
+ *
+ *   JobPilot.screens.go('jobs')     move to a screen (also updates the address bar)
+ *   JobPilot.screens.current()      which screen is showing
+ *   JobPilot.mount('jobs')          the empty <div> inside it to render into
+ *
+ *   JobPilot.data                   last snapshot from the server, or null
+ *   JobPilot.refresh()              re-fetch now; resolves when the data has landed
+ *   document.addEventListener('jobpilot:data', e => …e.detail)
+ *                                   fires after every successful refresh
+ *
+ *   JobPilot.theme.get() / .set('dark') / .toggle()
+ *
+ * The screen showing is kept in the address bar (#/home, #/jobs, …) so a reload
+ * lands back where the person was.
+ * ======================================================================== */
+const JobPilot = (window.JobPilot = {});
+
+(() => {
+  // ---------- Light or dark ----------
+  // The very first application happens in the inline script in index.html,
+  // before the stylesheet loads, so the window never flashes the wrong colours.
+  const THEME_KEY = 'jp_theme';
+  const themeOf = () => document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+
+  function setTheme(next) {
+    const t = next === 'dark' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+    try { localStorage.setItem(THEME_KEY, t); } catch { /* storage disabled — this session only */ }
+    const btn = document.getElementById('themeToggle');
+    if (btn) {
+      btn.textContent = t === 'dark' ? '☾' : '☀';
+      btn.title = t === 'dark' ? 'Switch to the light look' : 'Switch to the dark look';
+    }
+    document.dispatchEvent(new CustomEvent('jobpilot:theme', { detail: { theme: t } }));
+    return t;
+  }
+
+  JobPilot.theme = {
+    get: themeOf,
+    set: setTheme,
+    toggle: () => setTheme(themeOf() === 'dark' ? 'light' : 'dark')
+  };
+  setTheme(themeOf()); // paints the right icon on the toggle
+
+  // ---------- The screen router ----------
+  // A screen is any <section class="jp-screen" data-screen="NAME"> in the page.
+  // `data-chrome="off"` on the section hides the header while it is showing.
+  const TITLES = {
+    home: 'Home', jobs: 'My jobs', report: "How it's going",
+    settings: 'Settings', you: 'You', welcome: 'Welcome'
+  };
+  const HOME = 'home';
+  const handlers = {};
+  let showing = null;
+
+  const sectionOf = name => document.querySelector(`.jp-screen[data-screen="${name}"]`);
+  const exists = name => !!name && !!sectionOf(name);
+
+  function fromHash() {
+    const m = /^#\/([a-z-]+)/.exec(location.hash || '');
+    return m && exists(m[1]) ? m[1] : null;
+  }
+
+  function show(name) {
+    if (!exists(name)) name = HOME;
+    if (name === showing) return;
+    const leaving = showing;
+    if (leaving && handlers[leaving]?.onLeave) {
+      try { handlers[leaving].onLeave(sectionOf(leaving)); }
+      catch (err) { console.warn(`[screen ${leaving}] onLeave failed:`, err); }
+    }
+    showing = name;
+
+    for (const el of document.querySelectorAll('.jp-screen')) {
+      el.classList.toggle('is-active', el.dataset.screen === name);
+    }
+    for (const btn of document.querySelectorAll('[data-go]')) {
+      btn.classList.toggle('is-active', btn.dataset.go === name);
+    }
+    const el = sectionOf(name);
+    document.body.classList.toggle('jp-chrome-off', el.dataset.chrome === 'off');
+    document.title = `${TITLES[name] || 'JobPilot'} · JobPilot`;
+    window.scrollTo(0, 0);
+
+    if (handlers[name]?.onEnter) {
+      try { handlers[name].onEnter(el); }
+      catch (err) { console.warn(`[screen ${name}] onEnter failed:`, err); }
+    }
+    document.dispatchEvent(new CustomEvent('jobpilot:screen', { detail: { screen: name, from: leaving } }));
+  }
+
+  function go(name) {
+    if (!exists(name)) name = HOME;
+    const hash = '#/' + name;
+    if (location.hash === hash) show(name);
+    else location.hash = hash;   // the hashchange listener calls show()
+  }
+
+  JobPilot.screens = {
+    register(name, spec = {}) {
+      if (!exists(name)) { console.warn(`[router] no screen called "${name}" in the page`); return; }
+      handlers[name] = spec;
+      if (showing === name && spec.onEnter) {
+        try { spec.onEnter(sectionOf(name)); }
+        catch (err) { console.warn(`[screen ${name}] onEnter failed:`, err); }
+      }
+    },
+    go,
+    current: () => showing,
+    list: () => [...document.querySelectorAll('.jp-screen')].map(el => el.dataset.screen)
+  };
+  JobPilot.mount = name => document.getElementById('mount-' + name);
+
+  window.addEventListener('hashchange', () => show(fromHash() || HOME));
+
+  // Any element with data-go="screen" navigates — header nav, links inside a
+  // screen, an empty state's "have a look at your jobs" button, anything.
+  document.addEventListener('click', e => {
+    const trigger = e.target.closest('[data-go]');
+    if (!trigger) return;
+    e.preventDefault();
+    go(trigger.dataset.go);
+  });
+
+  document.getElementById('themeToggle')?.addEventListener('click', () => JobPilot.theme.toggle());
+
+  show(fromHash() || HOME);
+})();
 
 function toast(msg, isErr = false) {
   const t = $('#toast');
@@ -60,6 +211,14 @@ function costSuffix(cost) {
   return `  ·  cost ${fmtCost(cost.usd)}${parts.length ? ` (${parts.join(', ')})` : ''}`;
 }
 
+// What a run cost, said the way a person would read it. costSuffix() is the
+// old dashboard's version and breaks it down by AI vs source.
+function costWords(cost) {
+  const usd = cost && (cost.usd || 0);
+  if (!usd) return '';
+  return usd < 0.01 ? ' It cost less than a penny.' : ` It cost ${'$' + usd.toFixed(2)}.`;
+}
+
 function stageOf(a) {
   if (a.status === 'rejected') return 'rejected';
   if (a.status === 'closed') return 'no_response';
@@ -93,28 +252,57 @@ async function refresh() {
   state.applications = appsData.applications;
   state.stats = stats;
   state.settings = settings;
-  renderStats(stats);
-  renderBoard();
-  renderSmartButton();
-  renderCostLine();
-  renderProfiles(profilesData.profiles);
-  renderActivity(stats.activity);
   state.currentRun = runsData.current || null;
-  renderRuns(runsData);
-  renderRunStatus();
-  renderProfileCard();
-  renderSideStatus(settings);
-  const badge = $('#modeBadge');
-  badge.textContent = stats.mockMode ? 'AI: mock mode' : `AI: ${stats.provider.provider} · ${stats.provider.model}`;
-  badge.className = 'badge ' + (stats.mockMode ? 'mock' : 'live');
-  if (state.settings) {
-    $('#modeSelect').value = state.settings.mode;
+
+  // The single snapshot every screen reads. Published before anything renders,
+  // so one screen failing can never stop another screen seeing the data.
+  JobPilot.data = {
+    applications: state.applications,
+    stats,
+    settings,
+    profiles: profilesData.profiles,
+    runs: runsData.runs || [],
+    currentRun: state.currentRun
+  };
+
+  // The pre-revamp dashboard. Fenced off on purpose: the day its markup finally
+  // comes out of index.html, the snapshot above must still reach the new
+  // screens instead of the whole refresh dying on a missing element.
+  try {
+    renderStats(stats);
+    renderBoard();
+    renderSmartButton();
+    renderCostLine();
+    renderProfiles(profilesData.profiles);
+    renderActivity(stats.activity);
+    renderRuns(runsData);
+    renderRunStatus();
+    renderProfileCard();
+    renderSideStatus(settings);
+    const badge = $('#modeBadge');
+    if (badge) {
+      // The subscription provider's internal key reads badly in the badge; the
+      // other three already read fine as-is.
+      const providerName = stats.provider.provider === 'claude_code' ? 'Claude subscription' : stats.provider.provider;
+      badge.textContent = stats.mockMode ? 'AI: mock mode' : `AI: ${providerName} · ${stats.provider.model}`;
+      badge.className = 'badge ' + (stats.mockMode ? 'mock' : 'live');
+    }
+    const modeSel = $('#modeSelect');
+    if (modeSel) modeSel.value = settings.mode;
+  } catch (err) {
+    console.warn('[legacy dashboard] render skipped:', err);
   }
+
+  document.dispatchEvent(new CustomEvent('jobpilot:data', { detail: JobPilot.data }));
+
+  // Keep the open job panel in step with the new data — and close it if the job
+  // itself has gone (deleted here, or on another tab).
   if (state.openId) {
     const a = state.applications.find(x => x.id === state.openId);
-    if (a) renderDrawer(a);
+    if (a) renderDrawer(a); else closeDrawer();
   }
 }
+JobPilot.refresh = () => refresh();
 
 // ---------- The smart button ----------
 
@@ -124,37 +312,96 @@ function pipelineCounts() {
   return { disc: by.discovered || 0, appr: by.approved || 0, ready: by.ready || 0, action: by.action || 0 };
 }
 
+// ---------- Who presses send ----------
+//
+// One answer, read everywhere, so no screen can offer something the server will
+// refuse (or worse, quietly do). 'myself' is what an unset value means, and it
+// is what the server's own `sendingMode()` decides too — see server/db.js.
+function sendsHerself(data) {
+  const s = (data || JobPilot.data || {}).settings || state.settings || {};
+  return s.sendingMode !== 'jobpilot';
+}
+
+// JobPilot only chases by email what it actually sent by email. Everything else
+// — no address, applied by hand, or "I'll send them myself" — is the person's
+// own nudge to send, and the app says so instead of pretending.
+function chasedByUs(a) {
+  return !sendsHerself() && !!a.recipientEmail && !(a.applicationSent && a.applicationSent.manual);
+}
+
+// The CV is the one thing nothing works without.
+const hasCv = data => !!((data || JobPilot.data || {}).stats || state.stats || {}).hasProfile;
+
+// The one button that moves the whole thing forward: find → write → send. It
+// lives on Home and says, in plain words, what pressing it will do next. The
+// element itself is never re-created (renderHome only ever moves it between
+// slots), so this listener and the deferred AI/email questions keep working.
 function renderSmartButton() {
-  const { disc, appr, ready } = pipelineCounts();
+  const { disc, appr, ready: readyCount } = pipelineCounts();
   const btn = $('#smartBtn');
-  if (ready > 0) {
+  if (!btn) return;
+  const n = disc + appr;
+  // "Send this application" is only ever honest when JobPilot is the sender.
+  // When the person sends, those applications are handed to them under
+  // "Needs you" and the button never claims it will send anything.
+  const ready = sendsHerself() ? 0 : readyCount;
+  if (!hasCv()) {
+    // Without a CV the button used to start a search that could only fail. It
+    // now leads to the one thing that unblocks everything else.
+    btn.dataset.action = 'cv';
+    btn.textContent = 'Add your CV';
+  } else if (ready > 0) {
     btn.dataset.action = 'send';
-    btn.textContent = `📧 Email ${ready} application${ready > 1 ? 's' : ''}`;
-    btn.className = 'btn btn-green smart-btn';
-  } else if (disc + appr > 0) {
+    btn.textContent = ready > 1 ? `Send ${ready} applications` : 'Send this application';
+  } else if (n > 0) {
     btn.dataset.action = 'generate';
-    btn.textContent = `⚡ Generate ${disc + appr} CV${disc + appr > 1 ? 's' : ''} & email${disc + appr > 1 ? 's' : ''}`;
-    btn.className = 'btn btn-primary smart-btn';
+    btn.textContent = n > 1 ? `Write ${n} applications` : 'Write this application';
   } else {
     btn.dataset.action = 'fetch';
-    btn.textContent = '🔍 Find jobs';
-    btn.className = 'btn btn-primary smart-btn';
+    btn.textContent = state.applications.length ? 'Find more jobs' : 'Find my first jobs';
   }
+  btn.className = 'jp-btn jp-btn--primary jp-btn--sm';
+  // `data-action` is what the click handler and the deferred AI / email
+  // questions read — never change it without checking both.
 }
 
 function renderCostLine() {
+  const el = $('#costLine');
+  if (!el) return;                       // lives in the hidden legacy dashboard
   const total = state.stats ? state.stats.costTotalUSD : 0;
   const last = state.lastRunCost && state.lastRunCost.usd
     ? `<span class="last">last ${state.lastRunLabel}: ${fmtCost(state.lastRunCost.usd)}</span> · ` : '';
-  $('#costLine').innerHTML = `${last}API cost so far: <b>${fmtCost(total)}</b>`;
+  el.innerHTML = `${last}API cost so far: <b>${fmtCost(total)}</b>`;
 }
 
-$('#smartBtn').addEventListener('click', async e => {
+// Pull the next refresh forward. Pressing the big button opens a run on the
+// server, but the poll that would notice it can be 30 seconds away — so the
+// step checklist on Home would only appear on a long run. One early refresh
+// picks the run up, and the 3-second cadence takes over from there.
+function pokeRefresh(ms = 900) {
+  clearTimeout(state._refreshTimer);
+  state._refreshTimer = setTimeout(async () => {
+    try { await refresh(); } catch { /* the loop below carries on regardless */ }
+    if (typeof scheduleRefresh === 'function') scheduleRefresh();
+  }, ms);
+}
+
+$('#smartBtn')?.addEventListener('click', async e => {
   const btn = e.currentTarget;
   const action = btn.dataset.action;
+  // No CV, no application — so the button opens the question that asks for one
+  // rather than starting work that can only come back with an error.
+  if (action === 'cv') {
+    await obHydrate().catch(() => {});
+    ob.i = OB_STEPS.indexOf('cv');
+    JobPilot.screens.go('welcome');
+    obRender();
+    return;
+  }
   btn.disabled = true;
   const oldText = btn.textContent;
-  btn.innerHTML = '<span class="spinner"></span>Working…';
+  btn.innerHTML = '<span class="jp-spinner"></span>Working…';
+  pokeRefresh();
   try {
     if (action === 'fetch') {
       const r = await api('/api/batch/fetch', { method: 'POST', body: {} });
@@ -163,9 +410,9 @@ $('#smartBtn').addEventListener('click', async e => {
         toast(r.reason, true); // fetch didn't run — tell the user exactly why
       } else {
         toast((r.added
-          ? `Found ${r.added} good new matches (${r.skipped} poor fits filtered). Remove any you don't like (✕), then hit the button again.`
-          : `No new matches right now — ${r.skipped} jobs were screened but didn't fit, and good ones may already be on your board. Try a manual search with a different term.`)
-          + costSuffix(r.cost));
+          ? `Found ${r.added} job${r.added === 1 ? '' : 's'} that suit you. Have a look through them, and drop any you don't fancy — then press the button again.`
+          : `Nothing new that suits you right now${r.skipped ? ` — we read ${r.skipped} and none were close enough` : ''}. Try again later, or widen what you're after in Settings.`)
+          + costWords(r.cost));
       }
     } else if (action === 'generate') {
       const r = await api('/api/batch/generate', { method: 'POST' });
@@ -173,21 +420,36 @@ $('#smartBtn').addEventListener('click', async e => {
       if (r.done === 0 && r.error) {
         toast(r.error, true);
       } else {
-        toast(`Generated ${r.done} tailored CVs & emails${r.fixed ? ` (${r.fixed} corrected by fact-check)` : ''}${r.failed ? ` (${r.failed} failed: ${esc(r.error)})` : ''}.`
-          + (r.manualQueued ? ` ${r.manualQueued} have no recruiter email — they're in "Your action ✋": apply on the platform, then confirm on the card.` : '')
-          + ' Review the drafts, then hit Send.' + costSuffix(r.cost));
+        toast(`Written — ${r.done} CV${r.done === 1 ? '' : 's'} and ${r.done === 1 ? 'a message' : 'messages'} to go with ${r.done === 1 ? 'it' : 'them'}`
+          + `${r.fixed ? `, and we corrected ${r.fixed} against your real CV` : ''}${r.failed ? ` (${r.failed} didn't work: ${esc(r.error)})` : ''}.`
+          + (r.manualQueued ? ` ${r.manualQueued} of them have nobody to email, so those are yours to send on the company's own site — they're under "Needs you".` : '')
+          + ' Read them if you like, then press Send.' + costWords(r.cost));
       }
     } else if (action === 'send') {
       const ready = state.applications.filter(a => a.status === 'ready').length;
       const { action: actionCount } = pipelineCounts();
-      if (!confirm(`Email ${ready} application${ready > 1 ? 's' : ''} with the tailored CV attached as PDF?`
-        + (actionCount ? `\n(${actionCount} more in "Your action" need you to apply on the platform yourself.)` : ''))) {
+      if (!confirm(`Send ${ready === 1 ? 'this application' : `these ${ready} applications`} now, with your CV attached to each one?`
+        + (actionCount ? `\n\n(${actionCount} more can only be done on the companies' own sites — those stay under "Needs you".)` : ''))) {
         btn.disabled = false; btn.textContent = oldText; return;
       }
       const r = await api('/api/batch/send', { method: 'POST' });
       const runCost = r.run ? { usd: r.run.costTotal, ai: r.run.costAI, source: r.run.costSource } : r.cost;
-      toast(`Sent: ${r.sent} real, ${r.simulated} simulated${r.expired ? `, ${r.expired} expired postings skipped` : ''}${r.failed ? `, ${r.failed} failed` : ''} — follow-ups on day 3, 5, 10.`
-        + (r.run ? ` Run total: AI ${fmtCost(r.run.costAI)} + sources ${fmtCost(r.run.costSource)} = ${fmtCost(r.run.costTotal)}` : costSuffix(runCost)));
+      const out = (r.sent || 0) + (r.simulated || 0);
+      if (r.yoursToSend) {
+        // The setting changed under us between drawing the button and pressing
+        // it. Nothing was sent, and the toast says exactly that.
+        toast("You send your applications yourself, so nothing was emailed. They're written and waiting for you under \"Needs you\".");
+        await refresh();
+        btn.disabled = false;
+        renderSmartButton();
+        return;
+      }
+      toast(`${out ? `${out} application${out === 1 ? '' : 's'} sent` : 'Nothing went out'}`
+        + `${r.simulated && !r.sent ? " — as a practice run, because your email isn't connected yet" : ''}`
+        + `${r.expired ? `, and ${r.expired} advert${r.expired === 1 ? ' had' : 's had'} already closed` : ''}`
+        + `${r.failed ? `, ${r.failed} didn't go through` : ''}`
+        + `. We'll remind them on day 3, 5 and 10.`
+        + costWords(r.run ? { usd: r.run.costTotal } : runCost));
     }
     await refresh();
   } catch (err) { toast(err.message, true); }
@@ -195,32 +457,32 @@ $('#smartBtn').addEventListener('click', async e => {
   renderSmartButton();
 });
 
-// ---------- Sync button: due follow-ups + inbox + reload ----------
+// ---------- "Check for replies": sends any nudges that are due, reads the inbox ----------
 
-$('#syncBtn').addEventListener('click', async e => {
+$('#syncBtn')?.addEventListener('click', async e => {
   const btn = e.currentTarget;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Syncing…';
+  btn.innerHTML = '<span class="jp-spinner"></span>Checking…';
   try {
     const r = await api('/api/sync', { method: 'POST' });
-    let msg = `Sync done: ${r.followupsSent} due follow-up${r.followupsSent === 1 ? '' : 's'} sent`;
+    const bits = [];
+    if (r.followupsSent) bits.push(`nudged ${r.followupsSent} compan${r.followupsSent === 1 ? 'y' : 'ies'} for you`);
     if (r.inbox) {
       const i = r.inbox;
-      const bits = [];
-      if (i.repliesFound) bits.push(`${i.repliesFound} repl${i.repliesFound === 1 ? 'y' : 'ies'}`);
-      if (i.interviews) bits.push(`${i.interviews} interview invite${i.interviews === 1 ? '' : 's'} 🎉`);
-      if (i.rejections) bits.push(`${i.rejections} rejection${i.rejections === 1 ? '' : 's'}`);
-      if (i.confirmations) bits.push(`${i.confirmations} received-confirmation${i.confirmations === 1 ? '' : 's'}`);
-      if (i.contactsCaptured) bits.push(`${i.contactsCaptured} contact${i.contactsCaptured === 1 ? '' : 's'} captured from platform replies`);
-      msg += `, inbox read (${bits.join(', ') || 'nothing new'})`;
+      if (i.interviews) bits.push(`${i.interviews === 1 ? 'one company wants' : `${i.interviews} companies want`} to meet you 🎉`);
+      if (i.repliesFound) bits.push(`${i.repliesFound} repl${i.repliesFound === 1 ? 'y' : 'ies'} came back`);
+      if (i.rejections) bits.push(`${i.rejections} said no`);
+      if (i.confirmations) bits.push(`${i.confirmations} confirmed they got your application`);
+      if (i.contactsCaptured) bits.push(`${i.contactsCaptured} new address${i.contactsCaptured === 1 ? '' : 'es'} to chase up`);
     }
-    else if (r.inboxError) msg += ` — inbox check failed: ${r.inboxError}`;
-    else msg += ' (add Gmail in Settings to also read replies)';
+    let msg = bits.length ? `All done — ${bits.join(', ')}.` : 'All done — nothing new since last time.';
+    if (r.inboxError) msg += ` We couldn't read your inbox: ${r.inboxError}`;
+    else if (!r.inbox) msg += " Connect your email in Settings and we can read the replies for you too.";
     toast(msg);
     await refresh();
   } catch (err) { toast(err.message, true); }
   btn.disabled = false;
-  btn.textContent = '🔄 Sync — follow-ups & inbox';
+  btn.textContent = 'Check for replies';
 });
 
 // ---------- Profiles ----------
@@ -235,7 +497,7 @@ function renderProfiles(profiles) {
     (profiles.length > 1 ? '<option value="__delete__">🗑 Delete current profile…</option>' : '');
 }
 
-$('#profileSelect').addEventListener('change', async e => {
+$('#profileSelect')?.addEventListener('change', async e => {
   const v = e.target.value;
   try {
     if (v === '__rename__') {
@@ -262,9 +524,30 @@ $('#profileSelect').addEventListener('change', async e => {
   } catch (err) { toast(err.message, true); refresh(); }
 });
 
+// Initials for the "You" button in the header — first letters of the name we
+// read from the CV, a neutral dot until there is one.
+function renderYouButton(profile) {
+  // Home greets people by name. The profile list only carries the *label* of a
+  // search ("New profile"), so the name off the CV is kept here instead. This
+  // lands one tick after the snapshot, so Home is redrawn when it changes.
+  const before = state.cvName;
+  state.cvName = (profile && profile.name) || '';
+  if (before !== state.cvName && typeof renderHome === 'function') {
+    try { renderHome(); } catch { /* Home may not be in this page */ }
+  }
+  const el = $('#youInitials');
+  if (!el) return;
+  const parts = String(profile?.name || '').trim().split(/\s+/).filter(Boolean);
+  el.textContent = parts.length
+    ? (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
+    : '·';
+}
+
 async function renderProfileCard() {
   const { profile } = await api('/api/profile');
+  renderYouButton(profile);
   const el = $('#profileCard');
+  if (!el) return;
   if (!profile) {
     el.innerHTML = `
       <div class="empty-profile">
@@ -278,16 +561,18 @@ async function renderProfileCard() {
     <div class="profile-title">${esc(profile.title)} · ${esc(profile.years_experience)} yrs</div>
     <div class="skill-chips">${(profile.skills || []).slice(0, 8).map(s => `<span class="chip">${esc(s)}</span>`).join('')}</div>
     <div style="display:flex;gap:12px;margin-top:10px">
-      <button class="btn-link" id="editProfileBtn" style="padding:0">✏️ Edit profile</button>
       <label class="btn-link" for="cvInput" style="padding:0">Re-upload CV</label>
     </div>
   `;
-  $('#editProfileBtn')?.addEventListener('click', () => openProfileEditor(profile));
 }
 
 // ---------- Stats / board / activity ----------
 
+// Everything from here to renderActivity() writes into the hidden pre-revamp
+// dashboard. Each one checks its own element exists first, so the day that
+// markup is finally deleted the new screens carry on untouched.
 function renderStats(s) {
+  if (!$('#stTotal')) return;
   $('#stTotal').textContent = s.total;
   $('#stApplied').textContent = s.applied;
   $('#stFollow').textContent = s.followupsSent;
@@ -301,6 +586,8 @@ function renderStats(s) {
 }
 
 function renderSideStatus(s) {
+  const sourceList = document.querySelector('.source-list');
+  if (!sourceList) return;
   const srcHtml = [
     { on: s.sources.ats, name: 'Career pages (ATS)', note: s.sources.ats ? 'live' : 'add companies' },
     { on: s.sources.remotive, name: 'Free boards ×3', note: s.sources.remotive ? 'live' : 'off' },
@@ -310,7 +597,7 @@ function renderSideStatus(s) {
   ].map(x =>
     `<div class="source ${x.on ? 'on' : ''}"><span class="dot ${x.on ? 'green' : 'gray'}"></span>${x.name} <small>${x.note}</small></div>`
   ).join('');
-  document.querySelector('.source-list').innerHTML = srcHtml;
+  sourceList.innerHTML = srcHtml;
 
   $('#emailStatus').innerHTML = s.smtpConfigured
     ? `<span class="on">✓ Email: sending as ${esc(s.fromName || s.smtpUser)}</span>`
@@ -329,13 +616,14 @@ function renderSideStatus(s) {
 
 function renderBoard() {
   const board = $('#board');
+  if (!board) return;
   const visible = state.applications.filter(matchesFilters);
   const filtering = filters.stage !== 'all' || filters.from || filters.to;
   $('#filterCount').textContent = filtering ? `${visible.length} of ${state.applications.length} shown` : '';
 
-  board.innerHTML = COLUMNS.map(col => {
-    const cards = visible.filter(a => col.statuses.includes(a.status));
-    const bulkBtn = col.id === 'action' && cards.length
+  board.innerHTML = bucketise(visible).map(col => {
+    const cards = col.rows;
+    const bulkBtn = col.id === 'needsyou' && cards.length
       ? `<button class="col-action" id="markAllAppliedBtn" title="Move every card here to Applied — use after you've applied to them on the platforms">✓ all applied</button>`
       : '';
     return `
@@ -357,34 +645,21 @@ function renderBoard() {
     } catch (err) { toast(err.message, true); }
   });
 
+  // A card opens the same slide-over panel the new My jobs screen uses — there
+  // is only one job detail view in the app. Dragging cards between columns is
+  // gone: the four buckets follow what actually happened, they aren't a to-do
+  // list you rearrange by hand.
   board.querySelectorAll('.card').forEach(el => {
-    el.addEventListener('dragstart', e => { el.classList.add('dragging'); e.dataTransfer.setData('id', el.dataset.id); });
-    el.addEventListener('dragend', () => el.classList.remove('dragging'));
     el.addEventListener('click', () => openDrawer(el.dataset.id));
   });
   board.querySelectorAll('.card-link').forEach(el => {
-    el.addEventListener('click', e => e.stopPropagation()); // open the posting, not the drawer
+    el.addEventListener('click', e => e.stopPropagation()); // open the posting, not the panel
   });
   board.querySelectorAll('.card-x').forEach(el => {
     el.addEventListener('click', async e => {
       e.stopPropagation();
       await api(`/api/applications/${el.dataset.id}`, { method: 'DELETE' });
       refresh();
-    });
-  });
-  board.querySelectorAll('.column').forEach(col => {
-    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('drag-over'); });
-    col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
-    col.addEventListener('drop', async e => {
-      e.preventDefault();
-      col.classList.remove('drag-over');
-      const id = e.dataTransfer.getData('id');
-      const colDef = COLUMNS.find(c => c.id === col.dataset.col);
-      const status = colDef.id === 'closed' ? 'rejected' : colDef.statuses[0];
-      try {
-        await api(`/api/applications/${id}`, { method: 'PATCH', body: { status } });
-        refresh();
-      } catch (err) { toast(err.message, true); }
     });
   });
 }
@@ -395,7 +670,7 @@ function cardHtml(a) {
     `<span class="pip ${(a.followups || []).some(f => f.day === d) ? 'sent' : ''}" title="Day ${d} follow-up"></span>`).join('');
   const removable = ['discovered', 'approved'].includes(a.status);
   return `
-    <div class="card" draggable="true" data-id="${esc(a.id)}">
+    <div class="card" data-id="${esc(a.id)}">
       ${removable ? `<button class="card-x" data-id="${esc(a.id)}" title="Not interested — remove">✕</button>` : ''}
       <div class="card-title">${esc(a.title)}</div>
       <div class="card-company">${esc(a.company)} · ${esc(a.location)}</div>
@@ -414,11 +689,13 @@ function cardHtml(a) {
     </div>`;
 }
 
-// Is a run step executing right now? Returns its label, or null.
+// Is a run step executing right now? Returns its label, or null. These three
+// words are also what the big button says while it is locked, and what the
+// step checklist on Home is built from — one set of words for one thing.
 const OP_LABELS = {
-  fetching:   { icon: '🔍', text: 'Finding jobs', count: r => `${r.found} found so far` },
-  generating: { icon: '⚡', text: 'Generating CVs & emails', count: r => `${r.tailored} done` },
-  sending:    { icon: '📧', text: 'Sending applications', count: r => `${r.sent + r.simulated} sent` }
+  fetching:   { icon: '🔍', text: 'Looking for jobs', count: r => `${r.found} found so far` },
+  generating: { icon: '✍', text: 'Writing your applications', count: r => `${r.tailored} written` },
+  sending:    { icon: '✉', text: 'Sending them off', count: r => `${r.sent + r.simulated} sent` }
 };
 function activeOp() {
   const r = state.currentRun;
@@ -438,19 +715,21 @@ function renderRunStatus() {
     el.innerHTML = `<span class="spinner"></span><b>${L.icon} ${L.text}…</b> <span class="rs-sub">${esc(L.count(r))}${r.mode === 'auto' ? ' · auto run' : ''} · running ${Math.max(0, Math.round((Date.now() - r.activeSince) / 1000))}s · cost so far ${fmtCost((r.costAI || 0) + (r.costSource || 0))}</span>`;
     // keep the big button locked while the step runs, with a matching label
     const btn = $('#smartBtn');
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner"></span>${L.text}…`;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="jp-spinner"></span>${L.text}…`;
+    }
   } else if (r) {
     // a cycle is open but no step executing — say exactly what it's waiting for
     const { disc, appr, ready } = pipelineCounts();
     const cost = `cost so far ${fmtCost((r.costAI || 0) + (r.costSource || 0))}`;
     let msg;
     if (disc + appr > 0) {
-      msg = `🔎 Found <b>${disc + appr}</b> jobs — waiting for your review. Remove bad fits (✕), then hit <b>⚡ Generate</b>.`;
+      msg = `Found <b>${disc + appr}</b> jobs that suit you. Have a look through them, then press <b>Write ${disc + appr} applications</b>.`;
     } else if (ready > 0) {
-      msg = `📝 <b>${ready}</b> tailored draft${ready > 1 ? 's' : ''} waiting for your review — open the cards to check CV &amp; email, then hit <b>📧 Email</b>.`;
+      msg = `<b>${ready}</b> application${ready > 1 ? 's are' : ' is'} written and waiting — read them if you like, then press <b>Send</b>.`;
     } else {
-      msg = `Finishing up — the run closes automatically once everything is sent or handed to you.`;
+      msg = `Finishing up — this round closes itself once everything is sent or handed to you.`;
     }
     el.className = 'run-status open';
     el.innerHTML = `<span class="rs-dot"></span><span>${msg} <span class="rs-sub">${r.mode === 'auto' ? 'auto run · ' : ''}${cost}</span></span>`;
@@ -478,568 +757,174 @@ function renderRuns({ runs = [], current = null } = {}) {
 }
 
 function renderActivity(items) {
+  if (!$('#activityFeed')) return;
   $('#activityFeed').innerHTML = (items || []).slice(0, 12).map(a =>
     `<li><span class="when">${timeAgo(a.at)}</span><span>${esc(a.text)}</span></li>`).join('') ||
     '<li><span>No activity yet — upload your CV and hit Find jobs.</span></li>';
 }
 
-// ---------- Drawer ----------
+/* ===========================================================================
+ * Installable app (PWA): service worker, install prompt, offline notice.
+ * Self-contained on purpose — nothing above this line depends on it, and the
+ * app behaves exactly as before in browsers that support none of it.
+ * ======================================================================== */
+(() => {
+  const DISMISS_KEY = 'jp_install_dismissed';
 
-function openDrawer(id) {
-  state.openId = id;
-  const a = state.applications.find(x => x.id === id);
-  if (!a) return;
-  renderDrawer(a);
-  $('#drawerOverlay').classList.remove('hidden');
-}
-
-function closeDrawer() {
-  state.openId = null;
-  $('#drawerOverlay').classList.add('hidden');
-}
-
-function renderDrawer(a) {
-  const t = a.tailored;
-  const fuStopped = a.replied || ['replied', 'interview', 'offer', 'rejected', 'closed'].includes(a.status);
-  const followupHtml = a.appliedAt && !a.recipientEmail ? `
-    <h3>Follow-ups — you applied on the platform (day 3, 5, 10)</h3>
-    <ul class="timeline">
-      ${[3, 5, 10].map(d => {
-        const f = (a.followups || []).find(x => x.day === d);
-        const due = a.appliedAt + d * 86400000;
-        if (f) return `
-          <li class="sent">
-            <div class="t-head">Day ${d} follow-up — done ✓ (on platform)</div>
-            <div class="t-sub">${timeAgo(f.sentAt)}</div>
-          </li>`;
-        if (fuStopped) return `
-          <li><div class="t-head">Day ${d} follow-up — cancelled</div>
-          <div class="t-sub">${a.replied ? 'they replied' : 'application closed'}</div></li>`;
-        if (Date.now() >= due) return `
-          <li>
-            <div class="t-head" style="color:var(--amber)">Day ${d} follow-up — DUE ⏰</div>
-            <div class="t-sub">Follow up on the platform (or message the recruiter), then
-              <button class="btn btn-green btn-sm fu-done-btn" data-day="${d}" style="margin-left:6px">✓ Mark done</button>
-            </div>
-          </li>`;
-        return `
-          <li><div class="t-head">Day ${d} follow-up — scheduled</div>
-          <div class="t-sub">due ${new Date(due).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} (you'll see a reminder here and in Activity)</div></li>`;
-      }).join('')}
-    </ul>
-    <p style="font-size:12px;color:var(--muted)">💡 Got an email from the company (confirmation, recruiter reply)? Paste the sender's address into
-    "Recruiter email" above — remaining follow-ups and reply tracking switch to automatic email.</p>` : a.appliedAt ? `
-    <h3>Follow-up schedule (auto: day 3, 5, 10)</h3>
-    <ul class="timeline">
-      ${[3, 5, 10].map(d => {
-        const f = (a.followups || []).find(x => x.day === d);
-        const due = new Date(a.appliedAt + d * 86400000);
-        return f ? `
-          <li class="sent">
-            <div class="t-head">Day ${d} follow-up — sent ✓</div>
-            <div class="t-sub">${timeAgo(f.sentAt)}${f.simulated ? ' (simulated)' : ` → ${esc(f.to)}`}</div>
-            <details><summary>View email</summary><pre class="doc">Subject: ${esc(f.email.subject)}\n\n${esc(f.email.body)}</pre></details>
-          </li>` : `
-          <li>
-            <div class="t-head">Day ${d} follow-up — ${a.replied || ['replied','interview','offer','rejected','closed'].includes(a.status) ? 'cancelled' : 'scheduled'}</div>
-            <div class="t-sub">${a.replied ? 'stopped — they replied' : `due ${due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} (sent automatically, or click Sync)`}</div>
-          </li>`;
-      }).join('')}
-    </ul>` : '';
-
-  $('#drawerContent').innerHTML = `
-    <h2>${esc(a.title)}</h2>
-    <div class="sub">${esc(a.company)} · ${esc(a.location)} · via ${esc(a.source)}
-      ${a.url ? `· <a href="${esc(a.url)}" target="_blank" style="color:var(--accent)">view posting ↗</a>` : ''}</div>
-
-    <div class="match-panel">
-      <strong>Match score: ${a.matchScore}%</strong> · stage: ${stageOf(a).replace('_', ' ')}
-      ${a.replied ? ` · <span style="color:var(--green)">replied ⭐</span>` : ''}
-      <ul>${(a.matchReasons || []).map(r => `<li>${esc(r)}</li>`).join('')}</ul>
-    </div>
-
-    <div class="recipient-row">
-      <span style="font-size:12.5px;color:var(--muted);white-space:nowrap">Recruiter email:</span>
-      <input type="email" id="recipientInput" placeholder="${a.status === 'action' || (!a.recipientEmail && !a.appliedAt) ? 'none found in posting — paste one to switch to email apply' : 'recruiter@company.com'}"
-        value="${esc(a.recipientEmail || '')}">
-    </div>
-    ${a.recruiterName ? `<div style="font-size:12px;color:var(--muted);margin:-6px 0 8px">Hiring contact: ${esc(a.recruiterName)}${a.recruiterUrl ? ` · <a href="${esc(a.recruiterUrl)}" target="_blank" style="color:var(--accent)">LinkedIn ↗</a>` : ''}</div>` : ''}
-
-    ${a.status === 'action' && t ? `
-      <div class="action-box">
-        <strong>✋ Your action needed</strong> — this posting has no recruiter email, so apply on the platform yourself.
-        The tailored CV &amp; message below are ready to copy in.
-        <div class="fix-row" style="margin-top:8px">
-          ${a.url ? `<a class="btn btn-primary btn-sm" href="${esc(a.url)}" target="_blank">Open posting &amp; apply ↗</a>` : ''}
-          <a class="btn btn-ghost btn-sm" href="/api/applications/${esc(a.id)}/cv.pdf" title="Saved to Downloads with the company & role in the filename">⬇ Download CV (PDF)</a>
-          <button class="btn btn-ghost btn-sm" id="copyCvBtn">📋 Copy CV text</button>
-          <button class="btn btn-ghost btn-sm" id="copyEmailBtn">📋 Copy message</button>
-          <button class="btn btn-green btn-sm" id="confirmAppliedBtn">✓ I applied — start tracking</button>
-        </div>
-      </div>` : ''}
-
-    ${a.qualityCheck && a.qualityCheck.checked && !a.qualityCheck.ok ? `
-      <div style="font-size:12px;color:var(--amber);margin:0 0 8px">
-        ⚠ Fact-check corrected this draft: ${esc((a.qualityCheck.problems || []).slice(0, 3).join('; '))}
-      </div>` : ''}
-
-    <div class="drawer-actions">
-      ${!t ? `<button class="btn btn-primary" id="tailorBtn">⚡ Generate tailored CV &amp; email</button>`
-           : `<button class="btn btn-ghost btn-sm" id="tailorBtn">↻ Regenerate</button>`}
-      ${t && a.status !== 'action' ? `<a class="btn btn-ghost btn-sm" href="/api/applications/${esc(a.id)}/cv.pdf">⬇ CV PDF</a>` : ''}
-      ${t && !a.applicationSent && a.status !== 'action' ? `<button class="btn btn-green" id="applyBtn">📧 Send application (CV attached as PDF)</button>` : ''}
-      ${a.applicationSent ? `<span class="tag done" style="align-self:center">${a.applicationSent.manual ? 'Applied on platform ✋' : 'Sent'} ${timeAgo(a.applicationSent.at)}${a.applicationSent.manual ? '' : a.applicationSent.simulated ? ' (simulated)' : ' → ' + esc(a.applicationSent.to)}</span>` : ''}
-      ${!['rejected', 'closed'].includes(a.status) ? `<button class="btn btn-ghost btn-sm" id="rejectBtn" style="color:var(--red)">Mark rejected</button>` : ''}
-      <button class="btn btn-ghost btn-sm" id="deleteBtn" style="margin-left:auto;color:var(--red)">Remove</button>
-    </div>
-
-    ${t ? `
-      <div class="review-box">
-        <strong>Review — not happy with this draft?</strong>
-        <div class="fix-row">
-          <input type="text" id="fixInput" placeholder='e.g. "make the email shorter", "emphasize my fintech work", "drop the salary line"'>
-          <button class="btn btn-primary btn-sm" id="fixBtn">✏️ Ask AI to fix</button>
-        </div>
-        <small>The AI rewrites this CV &amp; email with your change. Repeat until you're happy, then Send.</small>
-      </div>
-      <h3>Application email</h3>
-      <pre class="doc">Subject: ${esc(t.email_subject)}\n\n${esc(t.email_body)}</pre>
-      <h3>Tailored ATS CV ${t.keywords_used?.length ? `<span style="text-transform:none;letter-spacing:0">— keywords: ${esc(t.keywords_used.slice(0, 6).join(', '))}</span>` : ''}</h3>
-      <pre class="doc">${esc(t.cv)}</pre>
-      <div style="margin-top:8px">
-        <a class="btn btn-ghost btn-sm" href="/api/applications/${esc(a.id)}/cv.pdf">⬇ Download this CV as PDF</a>
-      </div>` : ''}
-
-    ${followupHtml}
-
-    <h3>Job description</h3>
-    <div class="jd">${esc(a.description)}</div>
-  `;
-
-  $('#recipientInput')?.addEventListener('change', async e => {
-    try {
-      await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { recipientEmail: e.target.value } });
-      toast('Recruiter email saved');
-      await refresh();
-    } catch (err) { toast(err.message, true); }
-  });
-
-  $('#tailorBtn')?.addEventListener('click', async e => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>Generating…';
-    try {
-      await api(`/api/applications/${a.id}/tailor`, { method: 'POST' });
-      toast('Tailored CV & email generated');
-      await refresh();
-    } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = '⚡ Generate tailored CV & email'; }
-  });
-
-  async function runFix() {
-    const feedback = $('#fixInput').value.trim();
-    if (!feedback) return toast('Type what to change first', true);
-    const btn = $('#fixBtn');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>Fixing…';
-    try {
-      await api(`/api/applications/${a.id}/tailor`, { method: 'POST', body: { feedback } });
-      toast('Revised — review the updated draft above');
-      await refresh();
-    } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = '✏️ Ask AI to fix'; }
-  }
-  $('#fixBtn')?.addEventListener('click', runFix);
-  $('#fixInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') runFix(); });
-
-  $('#applyBtn')?.addEventListener('click', async e => {
-    const btn = e.currentTarget;
-    const recipient = $('#recipientInput').value.trim();
-    if (recipient && !confirm(`Send this application email for real to ${recipient}?`)) return;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>Sending…';
-    try {
-      if (recipient !== (a.recipientEmail || '')) {
-        await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { recipientEmail: recipient } });
-      }
-      const res = await api(`/api/applications/${a.id}/apply`, { method: 'POST' });
-      toast(res.simulated
-        ? 'Application sent (simulated) — follow-ups scheduled for day 3, 5, 10'
-        : `Application emailed to ${recipient} — follow-ups scheduled for day 3, 5, 10`);
-      await refresh();
-    } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = '📧 Send application'; }
-  });
-
-  // "Your action" column: copy the tailored docs, confirm once applied
-  const copyToClipboard = async (text, label) => {
-    try { await navigator.clipboard.writeText(text); toast(`${label} copied — paste it into the application form`); }
-    catch { toast('Copy failed — select the text below and copy manually', true); }
-  };
-  $('#copyCvBtn')?.addEventListener('click', () => copyToClipboard(t.cv, 'CV'));
-  $('#copyEmailBtn')?.addEventListener('click', () => copyToClipboard(t.email_body, 'Message'));
-  $('#confirmAppliedBtn')?.addEventListener('click', async () => {
-    if (!confirm(`Confirm you applied to ${a.title} at ${a.company} on the platform? It moves to Applied and gets tracked.`)) return;
-    try {
-      await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { manualApplied: true } });
-      toast('Marked as applied — now tracked on the board ✓');
-      await refresh();
-    } catch (err) { toast(err.message, true); }
-  });
-
-  // manual follow-up reminders: "✓ Mark done" per due day
-  document.querySelectorAll('.fu-done-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      try {
-        await api(`/api/applications/${a.id}/followup-done`, { method: 'POST', body: { day: Number(btn.dataset.day) } });
-        toast(`Day-${btn.dataset.day} follow-up recorded ✓`);
-        await refresh();
-      } catch (err) { toast(err.message, true); }
+  // The worker caches the static shell only; every /api call stays network-only
+  // (see public/sw.js), so live job/application data can never go stale.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(err => {
+        // Not fatal: no offline shell, everything else works as before.
+        console.warn('Service worker registration failed:', err);
+      });
     });
-  });
-
-  $('#rejectBtn')?.addEventListener('click', async () => {
-    await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { status: 'rejected' } });
-    toast('Marked rejected');
-    refresh();
-  });
-
-  $('#deleteBtn')?.addEventListener('click', async () => {
-    await api(`/api/applications/${a.id}`, { method: 'DELETE' });
-    closeDrawer();
-    refresh();
-  });
-}
-
-// ---------- Feedback / mode / target ----------
-
-$('#feedbackBtn').addEventListener('click', async () => {
-  const text = $('#feedbackInput').value.trim();
-  if (!text) return toast('Type an instruction first', true);
-  const kind = $('#feedbackKind').value;
-  try {
-    await api('/api/feedback', { method: 'POST', body: { text, kind } });
-    $('#feedbackInput').value = '';
-    const label = { find: 'job finding', cv: 'CV writing', email: 'email writing' }[kind];
-    toast(`Saved to your ${label} instructions — the AI follows it from now on.`);
-    refresh();
-  } catch (err) { toast(err.message, true); }
-});
-
-$('#modeSelect').addEventListener('change', async e => {
-  const mode = e.target.value;
-  if (mode === 'auto' && !confirm('Auto mode fetches, generates AND sends applications without review, on the discovery schedule. Real emails go out if Gmail + recipient emails are set. Continue?')) {
-    e.target.value = 'manual';
-    return;
   }
-  await api('/api/settings', { method: 'POST', body: { mode } });
-  toast(mode === 'auto' ? 'Autopilot ON — full cycle runs automatically; you get a report email after each run' : 'Manual mode — the big button walks you through each step');
-  refresh();
-});
 
+  // The desktop launcher (JobPilot.app / JobPilot.command / JobPilot.bat) opens
+  // JobPilot in a Chrome "--app" window: no tabs, no address bar. That window
+  // reports `display-mode: standalone` — exactly what a genuinely installed app
+  // reports — so on its own we would decide JobPilot was already installed and
+  // hide the offer to install it. The launcher therefore says so in the address
+  // (?opened-by=launcher) and we remember it for THIS WINDOW only: sessionStorage
+  // survives reloads inside the window but is empty in the app a person later
+  // opens from their Dock, so a real installed app is never nagged.
+  const LAUNCHER_KEY = 'jp_launcher_window';
+  function launcherWindow() {
+    let flagged = false;
+    try { flagged = new URLSearchParams(location.search).get('opened-by') === 'launcher'; } catch { /* ancient browser */ }
+    try {
+      if (flagged) sessionStorage.setItem(LAUNCHER_KEY, '1');
+      return sessionStorage.getItem(LAUNCHER_KEY) === '1';
+    } catch { return flagged; } // storage disabled: the address alone has to do
+  }
 
-// ---------- Filters ----------
+  // Tidy the marker back out of the address bar once it is remembered, so it is
+  // never bookmarked or shared. The hash route is left exactly as it was.
+  (() => {
+    if (!launcherWindow() || !location.search) return;
+    try {
+      const q = new URLSearchParams(location.search);
+      if (!q.has('opened-by')) return;
+      q.delete('opened-by');
+      const rest = q.toString();
+      history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
+    } catch { /* cosmetic only — never worth an error */ }
+  })();
 
-$('#stageFilter').addEventListener('change', e => { filters.stage = e.target.value; renderBoard(); });
-$('#dateFrom').addEventListener('change', e => { filters.from = e.target.value; renderBoard(); });
-$('#dateTo').addEventListener('change', e => { filters.to = e.target.value; renderBoard(); });
-$('#clearFilters').addEventListener('click', () => {
-  filters = { stage: 'all', from: '', to: '' };
-  $('#stageFilter').value = 'all';
-  $('#dateFrom').value = '';
-  $('#dateTo').value = '';
-  renderBoard();
-});
+  const isInstalled = () =>
+    !launcherWindow() && (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+      navigator.standalone === true); // iOS home-screen apps
 
-// ---------- Improvement reports ----------
+  let deferredPrompt = null; // Chrome's beforeinstallprompt event, usable once
+  let banner = null;
 
-async function openReports() {
-  const r = await api('/api/insights');
-  $('#reportSub').textContent =
-    `Auto-generated every ${r.config.every} applications and after each automated run` +
-    (r.config.email ? `, emailed to ${r.config.email}` : '') +
-    `. ${r.appliedSinceReport} application(s) since the last report.`;
-  $('#reportList').innerHTML = (r.reports || []).map(rep => `
-    <div class="report-item">
-      <div class="r-head">${esc(rep.subject)}</div>
-      <div class="r-sub">${timeAgo(rep.at)} · trigger: ${esc(rep.trigger)}</div>
-      <details><summary style="cursor:pointer;font-size:12px;color:var(--accent)">Read report</summary>
-      <pre class="doc" style="margin-top:8px">${esc(rep.body)}</pre></details>
-    </div>`).join('') || '<p style="color:var(--muted);font-size:13px">No reports yet — apply to some jobs first, or generate one now.</p>';
-  $('#reportOverlay').classList.remove('hidden');
-}
+  function closeBanner() {
+    if (banner) banner.remove();
+    banner = null;
+  }
 
-// Close a modal on a true backdrop click only. A plain click handler also fires
-// when a drag STARTS inside the modal (selecting text, sliding over an input)
-// and ends on the backdrop — so require mousedown AND mouseup on the backdrop.
-function bindOverlayClose(overlayId, close) {
-  const el = $('#' + overlayId);
-  let downOnBackdrop = false;
-  el.addEventListener('mousedown', e => { downOnBackdrop = e.target.id === overlayId; });
-  el.addEventListener('click', e => {
-    if (downOnBackdrop && e.target.id === overlayId) close();
-    downOnBackdrop = false;
+  // Sits at the top of Home, above whatever needs you — the old dashboard it
+  // used to hang off is hidden now, so it follows the screen people look at.
+  function showBanner() {
+    if (banner || !deferredPrompt || isInstalled()) return;
+    if (localStorage.getItem(DISMISS_KEY) === '1') return;
+    const anchor = document.getElementById('homeRun') || $('#statsRow');
+    if (!anchor || !anchor.parentNode) return;
+
+    banner = document.createElement('div');
+    banner.className = 'jp-card jp-card--quiet jp-card--tight jp-install-banner';
+    banner.id = 'installBanner';
+    banner.innerHTML = `
+      <span class="jp-avatar jp-avatar--accent">✈</span>
+      <div class="jp-row-main">
+        <div class="jp-h-sans--sm">Keep JobPilot in your Dock</div>
+        <div class="jp-note">Its own icon in your Dock or Start menu, and its own window with no browser tabs around it. Same data, same computer.</div>
+      </div>
+      <button id="installYes" class="jp-btn jp-btn--primary jp-btn--sm">Install it</button>
+      <button id="installNo" class="jp-btn jp-btn--link">Not now</button>`;
+    anchor.parentNode.insertBefore(banner, anchor);
+
+    $('#installYes').addEventListener('click', doInstall);
+    $('#installNo').addEventListener('click', () => {
+      localStorage.setItem(DISMISS_KEY, '1'); // asked once, that's enough
+      closeBanner();
+      toast('Fine — install any time from the browser menu → "Install JobPilot".');
+    });
+  }
+
+  async function doInstall() {
+    if (!deferredPrompt) { closeBanner(); return; }
+    const btn = $('#installYes');
+    if (btn) btn.disabled = true;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    deferredPrompt = null; // the event is spent either way
+    closeBanner();
+    if (outcome !== 'accepted') {
+      // Not persisted: Chrome re-fires beforeinstallprompt on a later visit.
+      toast('Install cancelled — the option stays in the browser menu.');
+    }
+  }
+
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault(); // suppress Chrome's own mini-infobar; we ask in-app
+    deferredPrompt = e;
+    showBanner();
+    notify();
   });
-}
 
-$('#reportBtn').addEventListener('click', () => openReports().catch(err => toast(err.message, true)));
-$('#reportClose').addEventListener('click', () => $('#reportOverlay').classList.add('hidden'));
-bindOverlayClose('reportOverlay', () => $('#reportOverlay').classList.add('hidden'));
+  window.addEventListener('appinstalled', () => {
+    deferredPrompt = null;
+    localStorage.setItem(DISMISS_KEY, '1');
+    closeBanner();
+    notify();
+    toast('JobPilot installed — look for the ✈️ icon in your Dock or Start menu.');
+  });
 
-$('#reportRunBtn').addEventListener('click', async e => {
-  const btn = e.currentTarget;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Analyzing…';
-  try {
-    const r = await api('/api/insights/run', { method: 'POST' });
-    toast(r.emailed ? `Report generated and emailed to ${r.to}` : 'Report generated — read it below (add Gmail in Settings to receive it by email)');
-    await openReports();
-  } catch (err) { toast(err.message, true); }
-  btn.disabled = false;
-  btn.textContent = 'Generate report now';
-});
-
-// ---------- Profile editor (friendly form, no JSON) ----------
-
-let editingProfile = null; // keeps fields the form doesn't show
-
-function openProfileEditor(profile) {
-  editingProfile = profile || {};
-  $('#pfName').value = profile.name || '';
-  $('#pfEmail').value = profile.email || '';
-  $('#pfTitle').value = profile.title || '';
-  $('#pfYears').value = profile.years_experience ?? '';
-  $('#pfSkills').value = (profile.skills || []).join(', ');
-  $('#pfRoles').value = (profile.target_roles || []).join(', ');
-  $('#pfSummary').value = profile.summary || '';
-  $('#pfAchievements').value = (profile.top_achievements || []).join('\n');
-  $('#profileOverlay').classList.remove('hidden');
-}
-
-$('#profileClose').addEventListener('click', () => $('#profileOverlay').classList.add('hidden'));
-bindOverlayClose('profileOverlay', () => $('#profileOverlay').classList.add('hidden'));
-
-const splitList = (v, sep) => v.split(sep).map(x => x.trim()).filter(Boolean);
-
-$('#profileSave').addEventListener('click', async () => {
-  const profile = {
-    ...editingProfile, // preserve anything the AI extracted that the form doesn't show
-    name: $('#pfName').value.trim(),
-    email: $('#pfEmail').value.trim(),
-    title: $('#pfTitle').value.trim(),
-    years_experience: Number($('#pfYears').value) || 0,
-    skills: splitList($('#pfSkills').value, ','),
-    target_roles: splitList($('#pfRoles').value, ','),
-    summary: $('#pfSummary').value.trim(),
-    top_achievements: splitList($('#pfAchievements').value, '\n')
+  // The one deferred prompt lives here and can only be captured here (the event
+  // fires once per page load). Anything else that wants to offer the install
+  // reuses it through this hook rather than listening for the event a second time.
+  const watchers = [];
+  function notify() { for (const fn of watchers) { try { fn(); } catch { /* never break the app */ } } }
+  window.jobPilotInstall = {
+    canInstall: () => !!deferredPrompt && !isInstalled(),
+    isInstalled,
+    install: doInstall,
+    onChange: fn => { if (typeof fn === 'function') watchers.push(fn); }
   };
-  if (!profile.name) return toast('Please fill in your name', true);
-  try {
-    await api('/api/profile', { method: 'PUT', body: { profile } });
-    toast('Profile saved');
-    $('#profileOverlay').classList.add('hidden');
-    refresh();
-  } catch (err) { toast(err.message, true); }
-});
 
-// ---------- Collapsible sidebar ----------
-
-function applyNavState() {
-  document.body.classList.toggle('nav-collapsed', localStorage.getItem('jp_nav') === 'closed');
-}
-$('#navToggle').addEventListener('click', () => {
-  localStorage.setItem('jp_nav', document.body.classList.contains('nav-collapsed') ? 'open' : 'closed');
-  applyNavState();
-});
-applyNavState();
-
-// ---------- Settings modal ----------
-
-const MODEL_HINTS = {
-  groq: 'Groq defaults: llama-3.3-70b-versatile. Others: llama-3.1-8b-instant (faster).',
-  openai: 'OpenAI defaults: gpt-4o-mini. Others: gpt-4o, gpt-4.1-mini.',
-  anthropic: 'Anthropic defaults: claude-haiku-4-5-20251001 (budget). Best results: claude-sonnet-5.'
-};
-
-async function openSettings(welcome = false) {
-  const s = await api('/api/settings');
-  $('#welcomeBox').classList.toggle('hidden', !welcome);
-  $('#settingsTitle').textContent = welcome ? 'Set up JobPilot' : 'Settings';
-  $('#dataDirPath').textContent = s.dataDir;
-  $('#srcRemotive').checked = s.sources.remotive;
-  $('#srcLinkedin').checked = s.sources.linkedin;
-  $('#srcNaukri').checked = s.sources.naukri;
-  $('#setApifyToken').value = '';
-  $('#setApifyToken').placeholder = s.apifyTokenSet ? `configured ✓ (${s.apifyTokenMasked}) — paste to replace` : 'apify_api_…';
-  $('#setAtsCompanies').value = s.atsCompanies || '';
-  $('#setAdzunaAppId').value = s.adzunaAppId || '';
-  $('#setAdzunaAppKey').value = '';
-  $('#setAdzunaAppKey').placeholder = s.adzunaKeySet ? 'configured ✓ — paste to replace' : 'your Adzuna app key';
-  $('#setAdzunaCountry').value = s.adzunaCountry || 'in';
-  $('#setAutoMinScore').value = s.autoMinScore;
-  $('#setFactCheck').checked = s.factCheck;
-  $('#setCooldown').value = s.companyCooldownDays;
-  $('#setJobTitles').value = (s.jobTitles || []).join(', ');
-  $('#setJobLocations').value = (s.jobLocations || []).join(', ');
-  $('#setRemoteOk').checked = s.remoteOk;
-  $('#setMaxAge').value = s.maxJobAgeDays;
-  $('#setLowComp').checked = s.preferLowCompetition;
-  $('#setProvider').value = s.provider;
-  $('#setModel').value = s.model;
-  $('#setModel').placeholder = s.activeModel;
-  $('#modelHint').textContent = MODEL_HINTS[s.provider];
-  $('#setGroqKey').value = '';
-  $('#setGroqKey').placeholder = s.groqKeySet ? `configured ✓ (${s.groqKeyMasked}) — paste to replace` : 'gsk_…';
-  $('#setOpenaiKey').value = '';
-  $('#setOpenaiKey').placeholder = s.openaiKeySet ? `configured ✓ (${s.openaiKeyMasked}) — paste to replace` : 'sk-…';
-  $('#setAnthropicKey').value = '';
-  $('#setAnthropicKey').placeholder = s.anthropicKeySet ? `configured ✓ (${s.anthropicKeyMasked}) — paste to replace` : 'sk-ant-…';
-  $('#setPromptFind').value = s.promptFind;
-  $('#setPromptCV').value = s.promptCV;
-  $('#setPromptEmail').value = s.promptEmail;
-  $('#setAutoSearch').checked = s.autoSearch;
-  $('#setAutoSearchHours').value = s.autoSearchHours;
-  $('#setDailyTarget').value = s.dailyTarget;
-  $('#setInsightsEnabled').checked = s.insightsEnabled;
-  $('#setInsightsEvery').value = s.insightsEvery;
-  $('#setInsightsEmail').value = s.insightsEmail;
-  $('#setDevFeedback').checked = s.devFeedbackEnabled;
-  $('#setFromName').value = s.fromName;
-  $('#setSmtpUser').value = s.smtpUser;
-  $('#setSmtpPass').value = '';
-  $('#setSmtpPass').placeholder = s.smtpConfigured ? 'configured ✓ — paste to replace' : '16-character app password';
-  $('#settingsOverlay').classList.remove('hidden');
-}
-
-$('#setProvider').addEventListener('change', e => { $('#modelHint').textContent = MODEL_HINTS[e.target.value]; });
-$('#settingsBtn').addEventListener('click', () => openSettings());
-$('#settingsClose').addEventListener('click', () => $('#settingsOverlay').classList.add('hidden'));
-bindOverlayClose('settingsOverlay', () => $('#settingsOverlay').classList.add('hidden'));
-
-$('#settingsSave').addEventListener('click', async () => {
-  try {
-    if (($('#srcLinkedin').checked || $('#srcNaukri').checked) && !state.settings?.apifyTokenSet && !$('#setApifyToken').value.trim()) {
-      return toast(`${$('#srcLinkedin').checked ? 'LinkedIn' : 'Naukri'} needs an Apify token — see the steps under the LinkedIn checkbox`, true);
+  // Offline: the cached shell means you land in the app instead of on Chrome's
+  // dinosaur, but /api is network-only by design — so say plainly that the live
+  // data is paused rather than letting every poll surface as a red error.
+  let offlineBar = null;
+  function renderOffline() {
+    const anchor = document.getElementById('homeRun') || $('#runStatus');
+    if (navigator.onLine || !anchor || !anchor.parentNode) {
+      if (offlineBar) { offlineBar.remove(); offlineBar = null; }
+      return;
     }
-    await api('/api/settings', { method: 'POST', body: {
-      provider: $('#setProvider').value,
-      model: $('#setModel').value,
-      groqKey: $('#setGroqKey').value,
-      openaiKey: $('#setOpenaiKey').value,
-      anthropicKey: $('#setAnthropicKey').value,
-      promptFind: $('#setPromptFind').value,
-      promptCV: $('#setPromptCV').value,
-      promptEmail: $('#setPromptEmail').value,
-      fromName: $('#setFromName').value,
-      smtpUser: $('#setSmtpUser').value,
-      smtpPass: $('#setSmtpPass').value,
-      autoSearch: $('#setAutoSearch').checked,
-      autoSearchHours: $('#setAutoSearchHours').value,
-      dailyTarget: $('#setDailyTarget').value,
-      insightsEnabled: $('#setInsightsEnabled').checked,
-      insightsEvery: $('#setInsightsEvery').value,
-      insightsEmail: $('#setInsightsEmail').value,
-      devFeedbackEnabled: $('#setDevFeedback').checked,
-      sources: {
-        remotive: $('#srcRemotive').checked,
-        linkedin: $('#srcLinkedin').checked,
-        naukri: $('#srcNaukri').checked
-      },
-      apifyToken: $('#setApifyToken').value,
-      atsCompanies: $('#setAtsCompanies').value,
-      adzunaAppId: $('#setAdzunaAppId').value,
-      adzunaAppKey: $('#setAdzunaAppKey').value,
-      adzunaCountry: $('#setAdzunaCountry').value,
-      autoMinScore: $('#setAutoMinScore').value,
-      factCheck: $('#setFactCheck').checked,
-      companyCooldownDays: $('#setCooldown').value,
-      jobTitles: $('#setJobTitles').value,
-      jobLocations: $('#setJobLocations').value,
-      remoteOk: $('#setRemoteOk').checked,
-      maxJobAgeDays: $('#setMaxAge').value,
-      preferLowCompetition: $('#setLowComp').checked
-    }});
-    toast('Settings saved');
-    $('#settingsOverlay').classList.add('hidden');
-    refresh();
-  } catch (err) { toast(err.message, true); }
-});
-
-$('#testEmailBtn').addEventListener('click', async e => {
-  const btn = e.currentTarget;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Sending…';
-  try {
-    const res = await api('/api/settings/test-email', { method: 'POST' });
-    toast(`Test email sent to ${res.to} ✓ — check your inbox`);
-  } catch (err) { toast(err.message, true); }
-  btn.disabled = false;
-  btn.textContent = 'Send test email to myself';
-});
-
-// ---------- Misc wiring ----------
-
-$('#drawerClose').addEventListener('click', closeDrawer);
-bindOverlayClose('drawerOverlay', closeDrawer);
-
-$('#cvInput').addEventListener('change', async e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  toast('Uploading CV & extracting profile…');
-  const fd = new FormData();
-  fd.append('cv', file);
-  try {
-    const res = await fetch('/api/cv', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-    toast(`Profile extracted — ${data.profile.skills.length} skills found`);
-    $('#profileOverlay').classList.add('hidden');
-    refresh();
-  } catch (err) { toast(err.message, true); }
-  e.target.value = '';
-});
-
-$('#searchBtn').addEventListener('click', doSearch);
-$('#searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-
-async function doSearch() {
-  const btn = $('#searchBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>';
-  try {
-    const q = $('#searchInput').value.trim();
-    const res = await api('/api/jobs/search', { method: 'POST', body: { query: q } });
-    if (!res.added && res.note) {
-      toast(res.note, true); // nothing found — show the actual cause, not a shrug
-    } else {
-      toast(`Found ${res.added} new good matches via ${res.source} for "${res.query}"${res.skipped ? ` (${res.skipped} filtered out)` : ''}`);
-    }
-    refresh();
-  } catch (err) { toast(err.message, true); }
-  btn.disabled = false;
-  btn.textContent = 'Search';
-}
-
-$('#resetBtn').addEventListener('click', async () => {
-  if (!confirm('Reset ALL data for the current profile (CV, jobs, applications, reports)?')) return;
-  await api('/api/demo/reset', { method: 'POST' });
-  location.reload();
-});
-
-// Self-scheduling refresh: poll every 3s while a run step is executing (so the
-// live status and counts update in near-real-time), otherwise every 30s.
-function scheduleRefresh() {
-  clearTimeout(state._refreshTimer);
-  const delay = activeOp() ? 3000 : 30000;
-  state._refreshTimer = setTimeout(async () => {
-    try { await refresh(); } catch { /* keep looping through transient errors */ }
-    scheduleRefresh();
-  }, delay);
-}
-
-// First run: no data found → walk the user straight into setup
-(async () => {
-  await refresh();
-  if (state.settings?.firstRun && !sessionStorage.getItem('jp_welcomed')) {
-    sessionStorage.setItem('jp_welcomed', '1');
-    openSettings(true);
+    if (offlineBar) return;
+    offlineBar = document.createElement('div');
+    offlineBar.className = 'jp-card jp-card--warn jp-card--tight jp-offline-bar';
+    offlineBar.innerHTML = '<div class="jp-h-sans--sm">You are offline — this is the last thing JobPilot loaded</div>' +
+      '<div class="jp-note">Nothing is lost: your CV, your jobs and your applications are all on this computer. ' +
+      'Searching, applying and chasing up carry on the moment you are back.</div>';
+    anchor.parentNode.insertBefore(offlineBar, anchor);
   }
-  scheduleRefresh();
+
+  window.addEventListener('offline', () => {
+    renderOffline();
+    toast('You went offline — JobPilot paused live updates.', true);
+  });
+  window.addEventListener('online', () => {
+    renderOffline();
+    toast('Back online.');
+    refresh().catch(() => { /* the 30s poll will catch up */ });
+  });
+  renderOffline();
 })();
+
