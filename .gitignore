@@ -6,3 +6,13 @@ data/
 # Generated on each machine by install/make-macos-app.js (it bakes in the
 # local folder path, so it is never portable between computers).
 JobPilot.app/
+
+# Everything scripts/build-release.js makes: the Node runtimes it downloads
+# from nodejs.org, the staged release folders and the finished ZIPs. Hundreds
+# of megabytes of other people's binaries — the script belongs in git, the
+# things it produces do not. Rebuild them any time with:
+#   node scripts/build-release.js
+build/
+
+# A release download has the Node runtime inside it, here. Never in the repo.
+runtime/
