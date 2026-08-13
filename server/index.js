@@ -32,7 +32,12 @@ async function extractText(file) {
   const name = file.originalname.toLowerCase();
   if (name.endsWith('.pdf')) {
     const pdfParse = require('pdf-parse');
-    const out = await pdfParse(file.buffer);
+    // pdf-parse bundles pdf.js v1.10, which mis-reads a Node Buffer: multer
+    // hands us a *pooled* Buffer (a view into a shared 64KB block) and the
+    // parser reads past the view, so the same valid CV fails roughly four
+    // times in five with "bad XRef entry". new Uint8Array() copies the exact
+    // bytes into their own memory, which parses reliably.
+    const out = await pdfParse(new Uint8Array(file.buffer));
     return out.text;
   }
   if (name.endsWith('.docx')) {
