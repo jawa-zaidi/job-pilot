@@ -11,6 +11,8 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
+    "launch": "node install/launch.js",
+    "make-app": "node install/make-macos-app.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
