@@ -10,12 +10,20 @@ const { load, save } = require('../db');
 
 const TIMEOUT = 15000;
 
+// Same decoding as server/jobs.js — kept as its own copy because jobs.js already
+// requires this file, so importing it back would be a circular require.
+// Previously "&#39;" became a space, which turned "we're" into "we re".
 function stripHtml(html) {
+  const char = (cp) =>
+    (!Number.isFinite(cp) || cp < 32 || cp === 60 || cp === 62) ? ' ' : String.fromCodePoint(cp);
   return String(html || '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&#\d+;/g, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => char(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => char(Number(dec)))
+    .replace(/&nbsp;/g, ' ').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -25,7 +33,7 @@ async function getJson(url) {
     headers: { 'User-Agent': 'JobPilot', Accept: 'application/json' },
     signal: AbortSignal.timeout(TIMEOUT)
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new Error('the careers site would not let us look');
   return res.json();
 }
 
@@ -190,7 +198,7 @@ async function searchAts() {
         });
       }
     } catch (err) {
-      errors.push(`${slug} (${det.ats}): ${err.message}`);
+      errors.push(`${slug}: ${err.message}`);
     }
   }));
   return { jobs, errors };

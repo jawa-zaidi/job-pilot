@@ -328,13 +328,20 @@ async function chat(messages, { json = false, maxTokens = 2048, promptKinds = nu
     }
   } catch (err) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      throw new Error(`${c.label} API timed out after ${LLM_TIMEOUT_MS / 1000}s — try again, or switch model/provider in Settings.`);
+      throw plainError(`${c.label} took too long to answer — try again, or choose a different writer in Settings.`);
     }
     throw err;
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`${c.label} API ${res.status}: ${body.slice(0, 300)}`);
+    // The status code and the service's own words belong in the terminal, not
+    // in front of a person. What a person reads is written below.
+    console.error(`${c.label} request failed: ${res.status} ${body.slice(0, 300)}`);
+    const err = plainError(writerFailureText(c.label, res.status));
+    err.httpStatus = res.status;                       // so friendlyError can be exact
+    const wait = body.match(/try again in ([\dhm.\s]+)/i);
+    if (wait) err.retryHint = wait[1].trim();
+    throw err;
   }
   const data = await res.json();
   // Usage shapes differ: OpenAI/Groq use prompt/completion_tokens, Anthropic
@@ -358,15 +365,41 @@ async function chatJSON(messages, opts = {}) {
   return JSON.parse(out);
 }
 
-// Turn provider errors into plain, actionable messages
+// Keeps the status on the rewritten error so callers that back off on a
+// rate limit (batch generate) still can, without reading it out of the words.
+function withStatus(status, err) { err.httpStatus = status; return err; }
+
+// Errors marked `plain` are written for a person and can be shown as they are.
+function plainError(message) {
+  const err = new Error(message);
+  err.plain = true;
+  return err;
+}
+
+// What a person reads when the writing service turns us away. Same three cases
+// friendlyError() has always handled, said without the status code.
+function writerFailureText(label, status) {
+  if (status === 429) return `${label} has had enough requests from you for now — give it a little while and try again.`;
+  if (status === 401 || status === 403) return `${label} did not accept the code you saved — check it in Settings, under The writer.`;
+  if (status >= 500) return `${label} is having trouble at their end. Nothing is lost — try again in a few minutes.`;
+  return `${label} could not do that one — try again, or choose a different writer in Settings.`;
+}
+
+// Turn writing-service errors into plain, actionable messages
 function friendlyError(err) {
   const m = String(err.message || err);
-  if (m.includes(' 429')) {
-    const wait = m.match(/try again in ([\dhm.\s]+)/i);
-    return new Error(`AI daily limit reached on the free tier. ${wait ? `Try again in ${wait[1].trim()}, or ` : ''}switch the model in Settings to "llama-3.1-8b-instant" (much higher limits), or add an OpenAI key.`);
+  const status = err.httpStatus || 0;
+  // Claude-on-your-computer errors already say what to do — don't rewrite them
+  // into advice about pasted codes, which doesn't apply to that route.
+  if (err.claudeCode || m.includes('Claude Code')) return plainError(m.slice(0, 200));
+  if (status === 429 || m.includes(' 429')) {
+    const wait = err.retryHint || (m.match(/try again in ([\dhm.\s]+)/i) || [])[1];
+    return withStatus(429, plainError(`The free allowance for the writing has run out for now. ${wait ? `Try again in ${String(wait).trim()}, or ` : 'Try again later, or '}choose a different writer in Settings.`));
   }
-  if (m.includes(' 401') || m.includes(' 403')) return new Error('AI API key was rejected — check it in Settings.');
-  return new Error(m.slice(0, 200));
+  if (status === 401 || status === 403 || m.includes(' 401') || m.includes(' 403')) {
+    return withStatus(status || 401, plainError('The code saved for the writing was not accepted — check it in Settings, under The writer.'));
+  }
+  return err.plain ? err : new Error(m.slice(0, 200));
 }
 
 // For user-facing single actions: succeed, or throw a clear error when a key is
@@ -390,11 +423,32 @@ async function extractProfile(cvText) {
       role: 'system',
       content:
         'You extract structured candidate profiles from CV text. Respond ONLY with JSON: ' +
-        '{"name":str,"email":str,"title":str,"years_experience":num,"skills":[str],' +
-        '"top_achievements":[str],"summary":str,"target_roles":[str]}'
+        '{"name":str,"email":str,"location":str,"title":str,"years_experience":num,"skills":[str],' +
+        '"top_achievements":[str],"summary":str,"target_roles":[str]}. ' +
+        '"location" is where the person says they are (town, city or country as written on the CV) — ' +
+        'an empty string if the CV does not say. Never guess it.'
     },
     { role: 'user', content: `Extract the profile from this CV:\n\n${cvText.slice(0, 12000)}` }
   ], {}, () => mockProfile(cvText));
+}
+
+// Where the CV says they are, without a writer connected. Only the header block
+// is read (that is where people put it), and only two shapes are trusted: an
+// explicit "Location: …" line, and a "Town, Country" pair. Anything else comes
+// back empty — the welcome questions suggest nothing rather than the wrong
+// place, which is what reading the computer's timezone used to do.
+function mockLocation(cvText) {
+  const head = String(cvText || '').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 12);
+  for (const line of head) {
+    const tagged = /^(?:location|based in|address)\s*[:\-–]\s*(.+)$/i.exec(line);
+    if (tagged) return tagged[1].trim().slice(0, 60);
+  }
+  for (const line of head) {
+    if (line.includes('@') || /\d{4,}/.test(line)) continue;   // contact lines, not places
+    const m = /\b([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+)?, ?[A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+)?)\b/.exec(line);
+    if (m && m[1].length < 60) return m[1];
+  }
+  return '';
 }
 
 function mockProfile(cvText) {
@@ -408,11 +462,13 @@ function mockProfile(cvText) {
   return {
     name: firstLine.length < 60 ? firstLine : 'Candidate',
     email: emailMatch ? emailMatch[0] : '',
+    location: mockLocation(cvText),
     title: skills.length ? `${skills[0][0].toUpperCase() + skills[0].slice(1)} Professional` : 'Professional',
     years_experience: 3,
     skills: skills.length ? skills : ['communication', 'problem solving'],
-    top_achievements: ['(mock mode — add an API key in Settings for real extraction)'],
-    summary: 'Profile extracted in mock mode. Add a Groq or OpenAI key in Settings for full AI extraction.',
+    top_achievements: ['Set up the writer in Settings, then add your CV again — this gets filled in properly then.'],
+    summary: 'These details were picked out of your CV without the writer set up, so they are rough. '
+      + 'Set the writer up in Settings and add your CV again for a proper read.',
     target_roles: skills.slice(0, 3).map(s => `${s} roles`)
   };
 }
@@ -459,7 +515,7 @@ async function scoreJobs(profile, jobs) {
       score,
       reasons: hits.length
         ? [`Matches your skills: ${hits.slice(0, 4).join(', ')}`]
-        : ['General fit (mock scoring — add an API key in Settings)']
+        : ['Looks broadly right for you — set the writer up in Settings for a proper read of this one']
     };
   }
   return map;
@@ -498,9 +554,9 @@ async function tailorApplication(profile, cvText, job, feedback = '') {
   });
   messages.push({ role: 'user', content: userMsg });
   const out = await strictJSON(messages, { maxTokens: 4000, promptKinds: ['cv', 'email'] }, () => ({
-    cv: `${profile.name}\n${profile.email}\n\nSUMMARY\nTailored for ${job.title} at ${job.company}.\n\nSKILLS\n${(profile.skills || []).join(', ')}\n\n(mock mode — add an API key in Settings for a real tailored CV)`,
+    cv: `${profile.name}\n${profile.email}\n\nSUMMARY\nTailored for ${job.title} at ${job.company}.\n\nSKILLS\n${(profile.skills || []).join(', ')}\n\n(A stand-in, not your real CV. Set the writer up in Settings and this gets written properly.)`,
     email_subject: `Application for ${job.title} — ${profile.name}`,
-    email_body: `Dear ${job.company} team,\n\nI'm applying for the ${job.title} role. My background in ${(profile.skills || []).slice(0, 3).join(', ')} fits your requirements.\n\n(mock mode — add an API key in Settings for a fully tailored email)\n\nBest regards,\n${profile.name}`,
+    email_body: `Dear ${job.company} team,\n\nI'm applying for the ${job.title} role. My background in ${(profile.skills || []).slice(0, 3).join(', ')} fits your requirements.\n\n(A stand-in, not the real message. Set the writer up in Settings and this gets written properly.)\n\nBest regards,\n${profile.name}`,
     keywords_used: (profile.skills || []).slice(0, 5)
   }));
   if (out && out.email_body) out.email_body = formatEmailBody(out.email_body, profile.name);
@@ -578,7 +634,7 @@ async function followUpEmail(profile, job, dayNumber, previousEmails) {
   if (result) return result;
   return {
     subject: `Following up: ${job.title} application — ${profile.name}`,
-    body: `Hi ${job.company} team,\n\nI wanted to follow up on my application for ${job.title} (day ${dayNumber}). I remain very interested in the role.\n\n(mock mode)\n\nBest,\n${profile.name}`
+    body: `Hi ${job.company} team,\n\nI wanted to follow up on my application for ${job.title} (day ${dayNumber}). I remain very interested in the role.\n\n(A stand-in reminder — the writer is not set up yet.)\n\nBest,\n${profile.name}`
   };
 }
 
@@ -643,7 +699,7 @@ async function insightsReport(profile, snap, trigger) {
       `SUMMARY\nApplied: ${snap.applied}, replies: ${snap.replies} (${snap.replyRatePct}%), interviews: ${snap.interviews}.\n\n` +
       `IMPROVEMENT POINTS\n1. Add an AI key in Settings to get a real analysis of your pipeline.\n` +
       `2. ${snap.withRecruiterEmail < snap.applied ? `Only ${snap.withRecruiterEmail}/${snap.applied} applications had a recruiter email — add them so emails actually reach people.` : 'Keep recruiter emails filled in.'}\n` +
-      `3. ${snap.avgMatchScoreApplied < 65 ? `Average match of applied jobs is ${snap.avgMatchScoreApplied}% — focus on 70%+ matches.` : 'Match quality looks healthy.'}\n\n(mock mode report)`
+      `3. ${snap.avgMatchScoreApplied < 65 ? `Average match of applied jobs is ${snap.avgMatchScoreApplied}% — focus on 70%+ matches.` : 'Match quality looks healthy.'}\n\n(A rough read — the writer is not set up, so this is worked out from the numbers alone.)`
   };
 }
 

@@ -89,7 +89,7 @@ async function generateReport(trigger) {
     }
   }
   logActivity(
-    `📊 Improvement report generated (${trigger})${emailed ? ` and emailed to ${cfg.email}` : ' — view it via the sidebar (email not configured)'}`,
+    `📊 Improvement report generated (${trigger})${emailed ? ` and emailed to ${cfg.email}` : ''}`,
     'insights'
   );
   return { report, emailed, to: cfg.email };

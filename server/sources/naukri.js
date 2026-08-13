@@ -25,8 +25,8 @@ function parsePostedDate(v) {
 async function searchNaukri(query, { limit = 25, location = '' } = {}) {
   const s = load().settings || {};
   const token = s.apifyToken || '';
-  if (!token) throw new Error('Naukri needs an Apify token (Settings → Job sources)');
-  if (Date.now() < pausedUntil) throw new Error('Naukri paused after a recent error (retries soon)');
+  if (!token) throw new Error('Naukri needs your Apify code — add it in Settings, under Advanced');
+  if (Date.now() < pausedUntil) throw new Error('Naukri had trouble a few minutes ago, so we are leaving it be for a little while');
 
   const actor = (s.naukriActor || DEFAULT_ACTOR).trim();
   const url = `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=120`;
@@ -44,14 +44,14 @@ async function searchNaukri(query, { limit = 25, location = '' } = {}) {
   const bodyText = await res.text().catch(() => '');
   if (!res.ok) {
     pausedUntil = Date.now() + 10 * 60 * 1000;
-    let msg = `Apify Naukri error ${res.status}`;
+    let msg = 'Naukri would not answer through Apify just now';
     try {
       const e = JSON.parse(bodyText).error || {};
       if (e.type === 'full-permission-actor-not-approved') {
-        msg = `Naukri scraper needs one-time approval: open ${e.data?.approvalUrl || 'console.apify.com'} , click Approve, then search again`;
+        msg = `Naukri needs your approval once: open ${e.data?.approvalUrl || 'console.apify.com'}, click Approve, then look again`;
       } else if (e.type === 'actor-is-not-rented') {
-        msg = 'This Naukri scraper needs to be rented on Apify (open it in the Apify console and click Rent)';
-      } else if (e.message) msg = `Apify Naukri: ${e.message.slice(0, 160)}`;
+        msg = 'The Naukri reader has to be rented on Apify first — open it there and click Rent';
+      } else if (e.message) { console.error('Apify Naukri:', e.message.slice(0, 200)); }
     } catch { /* keep generic msg */ }
     throw new Error(msg);
   }

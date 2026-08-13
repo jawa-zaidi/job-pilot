@@ -2,6 +2,11 @@ const path = require('path');
 const express = require('express');
 const multer = require('multer');
 
+// People are told to leave the Terminal window open, so they read it as the
+// app's status display. This keeps developer diagnostics off that screen and in
+// a log file instead — first, before anything else can print.
+require('./log').install();
+
 const { load, save, now, logActivity, isFirstRun, DATA_DIR, saveCvOriginal,
         listProfiles, createProfile, switchProfile, deleteProfile, renameProfile } = require('./db');
 const llm = require('./llm');
@@ -50,9 +55,9 @@ async function extractText(file) {
 
 app.post('/api/cv', upload.single('cv'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: cv)' });
+    if (!req.file) return res.status(400).json({ error: 'No file came through — choose your CV and try again.' });
     const text = (await extractText(req.file)).trim();
-    if (text.length < 50) return res.status(400).json({ error: 'Could not extract enough text from that file' });
+    if (text.length < 50) return res.status(400).json({ error: "We couldn't read enough words out of that file. A PDF, a Word file or plain text works best." });
 
     const profile = await llm.extractProfile(text);
     const db = load();
@@ -64,7 +69,12 @@ app.post('/api/cv', upload.single('cv'), async (req, res) => {
     res.json({ profile, mockMode: !llm.hasKey() });
   } catch (err) {
     console.error('CV upload failed:', err);
-    res.status(500).json({ error: err.message });
+    // pdf-parse / mammoth throw library-speak when a file is malformed. Anything
+    // from the writing arrives already written for a person (err.plain), so pass
+    // that through rather than wrongly blaming the file.
+    res.status(500).json({
+      error: err.plain ? err.message : "We couldn't read that file. Try a PDF, a Word file or plain text."
+    });
   }
 });
 
@@ -76,7 +86,7 @@ app.get('/api/profile', (req, res) => {
 // User-edited profile (from the editable text box)
 app.put('/api/profile', (req, res) => {
   const { profile } = req.body;
-  if (!profile || typeof profile !== 'object') return res.status(400).json({ error: 'Invalid profile' });
+  if (!profile || typeof profile !== 'object') return res.status(400).json({ error: 'Those details did not come through — try again.' });
   const db = load();
   db.profile = profile;
   save();
@@ -138,7 +148,7 @@ app.post('/api/batch/send', async (req, res) => {
 // so the AI learns the user's preferences for that step from then on.
 app.post('/api/feedback', (req, res) => {
   const text = String(req.body.text || '').trim();
-  if (!text) return res.status(400).json({ error: 'Empty feedback' });
+  if (!text) return res.status(400).json({ error: 'Write the rule first — one line is plenty.' });
   const kind = ['find', 'cv', 'email'].includes(req.body.kind) ? req.body.kind : 'email';
   const field = { find: 'promptFind', cv: 'promptCV', email: 'promptEmail' }[kind];
   const db = load();
@@ -240,7 +250,7 @@ app.get('/api/applications', (req, res) => {
 app.patch('/api/applications/:id', (req, res) => {
   const db = load();
   const a = db.applications.find(x => x.id === req.params.id);
-  if (!a) return res.status(404).json({ error: 'Not found' });
+  if (!a) return res.status(404).json({ error: "We can't find that one — it may have been removed." });
   const { status, notes, recipientEmail, manualApplied } = req.body;
   if (manualApplied) {
     // "I applied on the platform" confirmation from the Your-action column
@@ -290,9 +300,9 @@ app.post('/api/applications/mark-all-applied', (req, res) => {
 app.post('/api/applications/:id/followup-done', (req, res) => {
   const db = load();
   const a = db.applications.find(x => x.id === req.params.id);
-  if (!a) return res.status(404).json({ error: 'Not found' });
+  if (!a) return res.status(404).json({ error: "We can't find that one — it may have been removed." });
   const day = Number(req.body?.day);
-  if (!FOLLOW_UP_DAYS.includes(day)) return res.status(400).json({ error: 'Invalid follow-up day' });
+  if (!FOLLOW_UP_DAYS.includes(day)) return res.status(400).json({ error: "That isn't one of the reminder days we use." });
   a.followups = a.followups || [];
   if (!a.followups.some(f => f.day === day)) {
     a.followups.push({ day, sentAt: now(), manual: true });
@@ -309,8 +319,8 @@ app.get('/api/applications/:id/cv.pdf', async (req, res) => {
   try {
     const db = load();
     const a = db.applications.find(x => x.id === req.params.id);
-    if (!a) return res.status(404).json({ error: 'Not found' });
-    if (!a.tailored?.cv) return res.status(400).json({ error: 'Generate the tailored CV first' });
+    if (!a) return res.status(404).json({ error: "We can't find that one — it may have been removed." });
+    if (!a.tailored?.cv) return res.status(400).json({ error: 'There is nothing written for this one yet.' });
     const { cvToPdfBuffer, cvFileName } = require('./pdf');
     const buf = await cvToPdfBuffer(a.tailored.cv, { name: db.profile?.name });
     res.setHeader('Content-Type', 'application/pdf');
@@ -333,8 +343,8 @@ app.post('/api/applications/:id/tailor', async (req, res) => {
   try {
     const db = load();
     const a = db.applications.find(x => x.id === req.params.id);
-    if (!a) return res.status(404).json({ error: 'Not found' });
-    if (!db.profile) return res.status(400).json({ error: 'Upload your CV first' });
+    if (!a) return res.status(404).json({ error: "We can't find that one — it may have been removed." });
+    if (!db.profile) return res.status(400).json({ error: "We need your CV first — it's what every application is written from." });
 
     const feedback = String(req.body?.feedback || '').trim();
     a.tailored = await llm.tailorApplication(db.profile, db.cvText || '', a, feedback);
@@ -374,7 +384,7 @@ app.post('/api/applications/:id/apply', async (req, res) => {
       a.notes = ((a.notes || '') + `\nExpired before applying: ${alive.reason}`).trim();
       save();
       logActivity(`Skipped ${a.title} at ${a.company} — ${alive.reason}`, 'move');
-      return res.status(409).json({ error: `This posting is no longer live (${alive.reason}) — moved to Closed.` });
+      return res.status(409).json({ error: `We didn't send it — ${alive.reason}. This job is closed now, so nothing more happens with it.` });
     }
 
     const { cvToPdfBuffer, cvFileName } = require('./pdf');
@@ -407,7 +417,7 @@ app.post('/api/applications/:id/apply', async (req, res) => {
     res.json({ application: a, simulated: result.simulated });
   } catch (err) {
     console.error('apply failed:', err);
-    res.status(500).json({ error: 'Email send failed: ' + err.message });
+    res.status(500).json({ error: err.message || "That one didn't go out. Nothing is lost — try again in a moment." });
   }
 });
 
@@ -612,16 +622,29 @@ app.post('/api/demo/reset', (req, res) => {
   res.json({ ok: true });
 });
 
+// The Terminal window is a status display to the person who was told to leave it
+// open, so this is the whole of what it says: where the app is, where their
+// files are, whether the writer is connected, and where to look if something
+// goes wrong. No stage names, no codes, no stack traces (see ./log).
 function start() {
   const server = app.listen(PORT, HOST, () => {
     const shownHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
-    console.log(`JobPilot running at http://${shownHost}:${PORT}`);
+    console.log(`JobPilot is running. Open it at http://${shownHost}:${PORT}`);
     if (LAN) {
-      console.log('⚠️  LAN mode ON — the app is reachable by anyone on your network (they could read your CV, change settings and send email from your Gmail). Unset HOST/JOBPILOT_LAN to bind to localhost only.');
+      console.log('Careful: anyone on your network can open this copy of JobPilot — read your CV, change your settings and send email as you. Close JobPilot and start it normally to keep it to this computer.');
     }
-    console.log(`Data folder: ${DATA_DIR} ${isFirstRun() ? '(new install — setup will open in the browser)' : '(existing data loaded)'}`);
+    console.log(`Your files are in ${DATA_DIR}${isFirstRun() ? ' — new here, so the questions will open in your browser.' : ' — your jobs and settings were found and loaded.'}`);
     const info = llm.providerInfo();
-    console.log(`LLM: ${info.hasKey ? `${info.provider} (${info.model})` : 'MOCK MODE (no API key)'}`);
+    if (info.hasKey) {
+      console.log(`The writer is connected${info.subscription ? ' through your Claude subscription, so there is nothing more to pay.' : '.'}`);
+    } else if (info.provider === 'claude_code') {
+      // Chosen but unusable: say so plainly, so this doesn't look like it worked.
+      console.log(`The writer is not ready yet. ${llm.claudeCodeStatus().detail} Until then JobPilot uses stand-in text and says so.`);
+    } else {
+      console.log('No writer is set up yet, so JobPilot uses stand-in text and says so. You can connect one in Settings.');
+    }
+    console.log(require('./log').where());
+    console.log('Leave this window open while you use JobPilot.');
     startScheduler();
     startAutoSearch();
   });

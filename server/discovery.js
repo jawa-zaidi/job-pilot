@@ -19,14 +19,14 @@ function rankBoosts(job, preferredTitles = []) {
   const boosts = [];
   let bonus = 0;
   const age = job.publishedAt ? (Date.now() - new Date(job.publishedAt).getTime()) / 86400000 : null;
-  if (age != null && age <= 2) { bonus += 8; boosts.push('posted <48h — few applicants yet (+8)'); }
-  else if (age != null && age <= 7) { bonus += 4; boosts.push('posted this week (+4)'); }
-  else if (age != null && age > 21) { bonus -= 5; boosts.push('3+ weeks old (−5)'); }
-  if (job.recipientEmail) { bonus += 10; boosts.push('recruiter email found — direct apply path (+10)'); }
-  if (job.source === 'Career page') { bonus += 5; boosts.push('direct from company career page (+5)'); }
+  if (age != null && age <= 2) { bonus += 8; boosts.push('Posted in the last two days, so few people have applied yet'); }
+  else if (age != null && age <= 7) { bonus += 4; boosts.push('Posted this week'); }
+  else if (age != null && age > 21) { bonus -= 5; boosts.push('The advert is over three weeks old'); }
+  if (job.recipientEmail) { bonus += 10; boosts.push('We found someone to send it to, so it goes straight to a person'); }
+  if (job.source === 'Career page') { bonus += 5; boosts.push("Straight from the company's own careers page"); }
   const title = (job.title || '').toLowerCase();
   if (preferredTitles.some(t => title.includes(t.toLowerCase()))) {
-    bonus += 6; boosts.push('matches one of your preferred job titles (+6)');
+    bonus += 6; boosts.push('It matches one of the job titles you asked for');
   }
   return { bonus, boosts };
 }

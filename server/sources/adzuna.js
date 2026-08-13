@@ -18,7 +18,7 @@ function isConfigured() {
 
 async function searchAdzuna(query, { limit = 25, maxAgeDays = 30, location = '' } = {}) {
   const c = adzunaConfig();
-  if (!isConfigured()) throw new Error('Adzuna app_id/app_key not set');
+  if (!isConfigured()) throw new Error('Adzuna needs its two codes — add them in Settings, under Advanced.');
   const params = new URLSearchParams({
     app_id: c.appId,
     app_key: c.appKey,
@@ -30,7 +30,7 @@ async function searchAdzuna(query, { limit = 25, maxAgeDays = 30, location = '' 
   if (location && !/^remote$/i.test(location)) params.set('where', location);
   const url = `https://api.adzuna.com/v1/api/jobs/${encodeURIComponent(c.country)}/search/1?${params}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`Adzuna API ${res.status}`);
+  if (!res.ok) throw new Error('Adzuna did not answer just now');
   const data = await res.json();
   return (data.results || []).map(j => ({
     id: `adzuna-${j.id}`,

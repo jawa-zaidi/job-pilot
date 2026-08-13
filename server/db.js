@@ -117,7 +117,7 @@ function loadRaw() {
     if (migratedFrom) {
       persist(); // write the new layout first, only then retire the old file
       try { fs.renameSync(migratedFrom, migratedFrom + '.migrated'); } catch { /* non-fatal */ }
-      console.log(`Migrated data to per-profile folders under ${PROFILES_DIR}`);
+      console.log('Your existing JobPilot files were moved into the new layout. Nothing was lost.');
     }
   }
   if (!raw.profiles[raw.activeProfileId]) raw.activeProfileId = Object.keys(raw.profiles)[0];
@@ -194,7 +194,7 @@ function listProfiles() {
 
 function renameProfile(id, label) {
   const r = loadRaw();
-  if (!r.profiles[id]) throw new Error('No such profile');
+  if (!r.profiles[id]) throw new Error('That search is no longer here.');
   const clean = String(label || '').trim();
   r.profiles[id].label = clean;
   if (id === r.activeProfileId && cache) cache.label = clean; // keep flattened view in sync
@@ -214,7 +214,7 @@ function createProfile() {
 
 function switchProfile(id) {
   const r = loadRaw();
-  if (!r.profiles[id]) throw new Error('No such profile');
+  if (!r.profiles[id]) throw new Error('That search is no longer here.');
   if (cache) save();
   r.activeProfileId = id;
   cache = null;
@@ -223,8 +223,8 @@ function switchProfile(id) {
 
 function deleteProfile(id) {
   const r = loadRaw();
-  if (!r.profiles[id]) throw new Error('No such profile');
-  if (Object.keys(r.profiles).length <= 1) throw new Error('Cannot delete the only profile');
+  if (!r.profiles[id]) throw new Error('That search is no longer here.');
+  if (Object.keys(r.profiles).length <= 1) throw new Error("This is your only search — there has to be one.");
   delete r.profiles[id];
   try { fs.rmSync(path.join(PROFILES_DIR, id), { recursive: true, force: true }); } catch { /* non-fatal */ }
   if (r.activeProfileId === id) r.activeProfileId = Object.keys(r.profiles)[0];

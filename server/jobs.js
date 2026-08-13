@@ -69,14 +69,30 @@ function isJunkContact(email) {
   return !email || JUNK_EMAIL.test(String(email).toLowerCase());
 }
 
-function stripHtml(html) {
-  return String(html || '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
+// Job boards hand back HTML with a mix of named and numeric entities. Every one
+// we miss is shown to the person verbatim — a description reading
+// "Liquidität &#x26; Cash" instead of "Liquidität & Cash".
+function decodeEntities(text) {
+  const char = (cp) =>
+    // never hand back < or > (or a control character) — this runs after the tag
+    // stripper, and re-creating a bracket would put markup back into the text
+    (!Number.isFinite(cp) || cp < 32 || cp === 60 || cp === 62) ? ' ' : String.fromCodePoint(cp);
+  return String(text)
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => char(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => char(Number(dec)))
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;|&#39;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&'); // last, so "&amp;#x26;" does not become "&"
+}
+
+function stripHtml(html) {
+  return decodeEntities(
+    String(html || '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' '))
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -187,7 +203,7 @@ async function searchRemotive(query, limit = 12) {
   // the same latest feed — so we pull the feed and keyword-filter locally.
   const url = `https://remotive.com/api/remote-jobs?limit=50`;
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`Remotive API ${res.status}`);
+  if (!res.ok) throw new Error('Remotive did not answer just now');
   const data = await res.json();
   const all = (data.jobs || []).map(j => ({
     id: `remotive-${j.id}`,
@@ -209,7 +225,7 @@ async function searchRemoteOK(query, limit = 12) {
     headers: { 'User-Agent': 'JobPilot' },
     signal: AbortSignal.timeout(15000)
   });
-  if (!res.ok) throw new Error(`RemoteOK API ${res.status}`);
+  if (!res.ok) throw new Error('RemoteOK did not answer just now');
   const data = await res.json();
   const all = (Array.isArray(data) ? data : []).filter(j => j && j.position).map(j => ({
     id: `remoteok-${j.id || j.slug}`,
@@ -228,7 +244,7 @@ async function searchRemoteOK(query, limit = 12) {
 // Arbeitnow — free public job board API, no key
 async function searchArbeitnow(query, limit = 12) {
   const res = await fetch('https://www.arbeitnow.com/api/job-board-api', { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`Arbeitnow API ${res.status}`);
+  if (!res.ok) throw new Error('Arbeitnow did not answer just now');
   const data = await res.json();
   const all = (data.data || []).map(j => ({
     id: `arbeitnow-${j.slug}`,
@@ -250,7 +266,7 @@ async function searchArbeitnow(query, limit = 12) {
 let linkedinPausedUntil = 0; // don't retry every query after a hard failure
 
 async function searchLinkedInApify(query, limit, token) {
-  if (Date.now() < linkedinPausedUntil) throw new Error('LinkedIn paused after a recent error (retries soon)');
+  if (Date.now() < linkedinPausedUntil) throw new Error('LinkedIn had trouble a few minutes ago, so we are leaving it be for a little while');
   const url = `https://api.apify.com/v2/acts/harvestapi~linkedin-job-search/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=120`;
   const prefs = jobPrefs();
   // LinkedIn ignores "Remote" as a location string, so pass only real places
@@ -273,15 +289,15 @@ async function searchLinkedInApify(query, limit, token) {
   const bodyText = await res.text().catch(() => '');
   if (!res.ok) {
     linkedinPausedUntil = Date.now() + 10 * 60 * 1000;
-    let msg = `Apify LinkedIn error ${res.status}`;
+    let msg = 'LinkedIn would not answer through Apify just now';
     try {
       const e = JSON.parse(bodyText).error || {};
       if (e.type === 'full-permission-actor-not-approved') {
-        msg = `LinkedIn needs one-time approval: open ${e.data?.approvalUrl || 'console.apify.com'} , click Approve, then search again`;
+        msg = `LinkedIn needs your approval once: open ${e.data?.approvalUrl || 'console.apify.com'}, click Approve, then look again`;
       } else if (e.type === 'actor-is-not-rented') {
-        msg = 'This LinkedIn scraper needs to be rented on Apify — contact support or wait for an app update';
+        msg = 'The LinkedIn reader has to be rented on Apify first — open it there and click Rent';
       } else if (e.message) {
-        msg = `Apify LinkedIn: ${e.message.slice(0, 160)}`;
+        console.error('Apify LinkedIn:', e.message.slice(0, 200));
       }
     } catch { /* keep generic msg */ }
     throw new Error(msg);
@@ -352,7 +368,7 @@ async function searchJobs(query, limit = 10) {
       const { jobs: all, errors: atsErrors } = await atsJobsCached();
       for (const e of atsErrors) {
         problems.push(e.includes('no public board')
-          ? `"${e.split(':')[0]}" runs its own careers site — JobPilot can only read public Greenhouse/Lever/Ashby/SmartRecruiters/Recruitee/Workable boards (most startups & scale-ups). Remove it, or reach it via Naukri/Adzuna instead`
+          ? `"${e.split(':')[0]}" runs its own careers site, which JobPilot cannot read. Most startups and scale-ups can be read; big companies often cannot. Take it off the list, or look for that company on the job boards instead`
           : `Career pages: ${e.slice(0, 90)}`);
       }
       const refined = refine(keywordFilter(all, query, limit * 2), prefs);
@@ -420,7 +436,7 @@ async function searchJobs(query, limit = 10) {
       problems.push(`LinkedIn: ${err.message.slice(0, 80)}`);
       if (err.message.includes('approval') || err.message.includes('rented')) {
         const db = load();
-        const recent = (db.activity || []).slice(0, 20).some(a => a.text.includes('LinkedIn needs') || a.text.includes('LinkedIn scraper'));
+        const recent = (db.activity || []).slice(0, 20).some(a => a.text.includes('LinkedIn needs') || a.text.includes('LinkedIn reader'));
         if (!recent) logActivity(`⚠️ ${err.message}`, 'error');
       }
     }
@@ -436,9 +452,9 @@ async function searchJobs(query, limit = 10) {
     } catch (err) {
       console.error('Naukri (Apify) fetch failed:', err.message);
       problems.push(`Naukri: ${err.message.slice(0, 80)}`);
-      if (err.message.includes('approval') || err.message.includes('rented') || err.message.includes('token')) {
+      if (err.message.includes('approval') || err.message.includes('rented') || err.message.includes('Apify code')) {
         const db = load();
-        const recent = (db.activity || []).slice(0, 20).some(a => a.text.includes('Naukri scraper') || a.text.includes('Naukri needs'));
+        const recent = (db.activity || []).slice(0, 20).some(a => a.text.includes('Naukri reader') || a.text.includes('Naukri needs'));
         if (!recent) logActivity(`⚠️ ${err.message}`, 'error');
       }
     }
@@ -446,7 +462,7 @@ async function searchJobs(query, limit = 10) {
 
   // Enabled-but-unusable sources are a config problem the user must hear about
   if ((cfg.linkedin || cfg.naukri) && !cfg.apifyToken) {
-    problems.push('LinkedIn/Naukri are ticked but no Apify token is set (Settings → Job sources)');
+    problems.push('LinkedIn and Naukri are switched on, but no Apify code is saved — add it in Settings, under Advanced');
   }
 
   if (!jobs.length) {
@@ -454,9 +470,9 @@ async function searchJobs(query, limit = 10) {
     const enabledAny = cfg.remotive || cfg.ats || cfg.adzuna || cfg.linkedin || cfg.naukri;
     let note = '';
     if (!enabledAny) {
-      note = 'No job sources are enabled — turn at least one on in Settings → 🔍 Job sources (the free boards need no key).';
+      note = 'No job sources are switched on — turn at least one on in Settings, under Advanced. The free boards need nothing setting up.';
     } else if (problems.length) {
-      note = `Sources returned nothing — ${[...new Set(problems)].join('; ')}`;
+      note = `Nothing came back this time — ${[...new Set(problems)].join('; ')}`;
     }
     return { jobs: [], source: used.join(' + ') || 'no sources', filtered, note };
   }
