@@ -1034,3 +1034,88 @@ a.jp-btn--good:hover { color: var(--good); }
 .jp-you-empty-lede { margin: 8px 0 18px; }
 .jp-you-save { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 4px; }
 
+/* ===========================================================================
+ * HOME and HOW IT'S GOING — appended last, nothing above this line touched.
+ *
+ * Both screens compose the component library; everything here is either a
+ * one-off spacing the comp calls for, or a shape the library had no equivalent
+ * for (the run checklist, the folded-away "more things you can do" block, the
+ * two-line advice rows). Tokens only — no hardcoded colours.
+ * ======================================================================== */
+
+/* The sentence under the greeting. */
+.jp-home-date { margin-top: 6px; }
+
+/* The one place the big button is standing right now. It is moved between
+   slots, never re-created, so the slot has to lay out like a button would. */
+.jp-home-slot { display: inline-flex; }
+
+/* The three cards that stack down Home: the round in progress, "Needs you",
+   the empty state. The comp gives the last one more air before the timeline. */
+.jp-home-block { margin-bottom: 26px; }
+#homeNeeds .jp-home-block { margin-bottom: 34px; }
+.jp-home-eyebrow { gap: 10px; margin-bottom: 4px; }
+.jp-home-needs-head { margin-bottom: 18px; }
+.jp-home-empty-note { margin-top: 16px; }
+
+/* The step checklist while a round is running. Done is green, the step that is
+   executing is full-strength, the ones still to come are quiet. */
+.jp-home-run-head { margin-bottom: 16px; }
+.jp-home-run-foot { margin-top: 14px; }
+.jp-home-step { gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 15px; }
+.jp-home-step-mark { width: 20px; text-align: center; flex-shrink: 0; }
+.jp-home-step.is-done, .jp-home-step.is-done .jp-home-step-mark { color: var(--good); }
+.jp-home-step.is-now { color: var(--ink); font-weight: 500; }
+.jp-home-step.is-next { color: var(--ink2); }
+
+/* A day of the timeline. */
+.jp-home-day { margin-bottom: 10px; }
+
+/* ---- "More things you can do" ------------------------------------------
+   One card, folded shut. The controls inside are the originals moved out of
+   the old dashboard, so their handlers and endpoints are untouched. */
+.jp-more {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-card); margin-top: 30px; overflow: hidden;
+}
+.jp-more-head {
+  display: flex; align-items: center; gap: 12px; cursor: pointer;
+  padding: 20px 24px; list-style: none;
+}
+.jp-more-head::-webkit-details-marker { display: none; }
+.jp-more-head:hover { background: var(--surface2); }
+.jp-more-chev { margin-left: auto; color: var(--ink2); }
+.jp-more[open] .jp-more-chev { transform: rotate(180deg); }
+.jp-more-body { padding: 0 24px 20px; }
+.jp-more-row {
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 0; border-top: 1px solid var(--line);
+}
+.jp-more-end { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
+.jp-more-input { width: 230px; }
+
+/* ---- How it's going ---------------------------------------------------- */
+.jp-report-lede { margin: 6px 0 28px; }
+.jp-report-lead { margin-bottom: 22px; }
+.jp-report-grid { margin-bottom: 22px; align-items: start; }
+.jp-report-h { margin-bottom: 14px; }
+.jp-report-note { margin-top: 4px; }
+.jp-report-advice { border-top: 1px solid var(--line); padding: 14px 0; }
+.jp-report-cta { margin-top: 10px; }
+.jp-report-long { margin-top: 14px; }
+.jp-report-long .jp-btn, .jp-report-cost-head .jp-btn { white-space: nowrap; }
+
+/* Both disclosures on this screen: the marker is replaced by the row itself. */
+.jp-report-details > summary { list-style: none; cursor: pointer; }
+.jp-report-details > summary::-webkit-details-marker { display: none; }
+.jp-report-cost-head { display: flex; align-items: center; gap: 18px; }
+.jp-report-runs { margin-top: 10px; border-top: 1px solid var(--line); }
+.jp-report-body { margin-top: 12px; }
+.jp-report-body > summary { color: var(--accent); }
+
+/* ---- Two strips that used to hang off the old dashboard ----------------- */
+.jp-install-banner, .jp-offline-bar { margin-bottom: 22px; }
+.jp-install-banner { display: flex; align-items: center; gap: 14px; }
+/* The two buttons keep their words on one line — the sentence beside them is
+   what should reflow in a narrow window, not "Install it". */
+.jp-install-banner .jp-btn { white-space: nowrap; }

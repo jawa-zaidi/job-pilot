@@ -3716,3 +3716,1074 @@ function scheduleRefresh() {
   renderOffline();
 })();
 
+/* ===========================================================================
+ * HOME — the timeline, and HOW IT'S GOING — the short read.
+ *
+ * Home answers three questions, in this order: is anything waiting on me, what
+ * has JobPilot been doing, and what happens next. Everything on it is derived
+ * from the one shared snapshot — no polling of its own, no second store.
+ *
+ * Two things are worth knowing before changing anything here:
+ *
+ *  1. THE BIG BUTTON (#smartBtn) AND #syncBtn ARE NEVER RE-CREATED. They are
+ *     written once in index.html and only ever MOVED between slots
+ *     (homePlace()), so the click handler bound at load, the run-status lock
+ *     and the deferred AI / email questions all keep working. Re-rendering them
+ *     as markup would silently break the product's core loop.
+ *  2. NOTHING THE SERVER LOGS REACHES THE SCREEN AS-IS. The activity feed is
+ *     written for a developer ("Batch generate: 7 tailored CVs & emails
+ *     ready…"); homeEvent() turns each line into a sentence a person would
+ *     say. Anything unrecognised falls back to a plain sentence for its type —
+ *     a raw string must never leak through.
+ * ======================================================================== */
+
+// ---------- Numbers as words, for sentences that are about the number -------
+const HOME_NUM = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+const HOME_TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+
+function numWords(n) {
+  n = Math.round(Number(n) || 0);
+  if (n < 0 || n >= 1000) return String(n);
+  if (n <= 20) return HOME_NUM[n];
+  if (n < 100) {
+    const r = n % 10;
+    return HOME_TENS[Math.floor(n / 10)] + (r ? '-' + HOME_NUM[r] : '');
+  }
+  const r = n % 100;
+  return `${HOME_NUM[Math.floor(n / 100)]} hundred${r ? ' and ' + numWords(r) : ''}`;
+}
+const capFirst = s => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// The same, with the number in words — for sentences where the number is the
+// point ("Two jobs are waiting on you").
+const pluralWords = (n, one, many) => `${numWords(n)} ${n === 1 ? one : many}`;
+
+// Money the way a person writes it. The old dashboard's fmtCost() prints
+// "$0.330" for a third of a dollar, which reads like a bug.
+function fmtMoney(usd) {
+  const n = Number(usd) || 0;
+  if (!n) return '$0.00';
+  if (n < 0.01) return 'under $0.01';
+  return '$' + n.toFixed(2);
+}
+
+// ---------- Days and clock times, said the way a person says them ----------
+const startOfDay = ts => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
+
+function dayLabel(ts) {
+  const days = Math.round((startOfDay(Date.now()) - startOfDay(ts)) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  const d = new Date(ts);
+  if (days < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
+  return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+}
+const clockTime = ts => new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+// The person's first name — what they told us it is, or failing that the name
+// on their CV. Never the profile's label: that is the name of a *search*
+// ("New profile", "US remote"), and greeting somebody by it would be wrong.
+function homeFirstName(data) {
+  const name = (data.settings && data.settings.fromName) || state.cvName || '';
+  const first = String(name).trim().split(/\s+/)[0] || '';
+  return /^(unknown|n\/?a|none)$/i.test(first) ? '' : first;
+}
+
+/* ---------------------------------------------------------------------------
+ * The activity feed, rewritten.
+ *
+ * Every line the server logs is matched against the rules below and comes out
+ * as { icon, tone, text, sub } — plus, where the line is about one job, the id
+ * of that job, so the row opens it. First rule that matches wins.
+ * ------------------------------------------------------------------------ */
+
+// The server writes "<title> at <company>" into most of its lines. Rather than
+// parsing that back out (titles contain " at " often enough), look for a job
+// whose own words appear in the line — the longest match wins.
+function findJobInText(text, apps) {
+  let best = null;
+  for (const a of apps || []) {
+    const needle = `${a.title} at ${a.company}`;
+    if (needle.length > 4 && text.includes(needle) &&
+      (!best || needle.length > `${best.title} at ${best.company}`.length)) best = a;
+  }
+  return best;
+}
+
+// What a job's internal status is called when we have to name it out loud.
+const HOME_MOVED_WORDS = {
+  rejected: 'they said no', closed: 'no reply', applied: 'you applied',
+  replied: 'they replied', interview: 'they want to meet you', offer: 'they offered you the job',
+  ready: 'ready to send', action: 'yours to apply for', discovered: 'found',
+  approved: 'ready for us to write', followup: 'waiting to hear back'
+};
+
+const HOME_RULES = [
+  // ---- something came back from a company -------------------------------
+  [/^\u{1F389} Interview invitation for .+?(?:\s\(.+?\))?! ?([\s\S]*)$/u, (m, c) => ({
+    icon: '\u{1F389}', tone: 'good', text: `${c.co} want to meet you`,
+    sub: m[1].trim() || 'They asked to talk — have a read.', cta: 'Read the message'
+  })],
+  [/^Reply (?:received|detected)/, (m, c) => ({
+    icon: '★', tone: 'good', text: `${c.co} wrote back`,
+    sub: 'A real person replied. We stopped chasing this one.', cta: 'Read the message'
+  })],
+  [/^Rejection received for/, (m, c) => ({
+    icon: '✕', text: `${c.co} said no`, sub: 'Nothing for you to do. We stopped chasing it.'
+  })],
+  [/^✓ Application confirmed received/, (m, c) => ({
+    icon: '✓', text: `${c.co} confirmed they got your application`,
+    sub: 'No answer from a person yet — we keep watching.'
+  })],
+  [/^\u{1F4CE} Contact captured for/u, (m, c) => ({
+    icon: '✉', text: `We found who to email at ${c.co}`,
+    sub: "From here we chase this one up by email, so you don't have to."
+  })],
+  [/^Inbox synced: (\d+) applications checked, (\d+) replies found/, m => ({
+    icon: '↻',
+    text: Number(m[2]) ? `Read your inbox — ${plural(Number(m[2]), 'reply', 'replies')} came back` : 'Read your inbox — nothing new',
+    sub: `We looked over ${plural(Number(m[1]), 'application', 'applications')}.`
+  })],
+
+  // ---- nudges ------------------------------------------------------------
+  [/^Auto follow-up \(day (\d+)\) (sent \(simulated\)|emailed to .+?) for/, (m, c) => ({
+    icon: '↻', text: `Nudged ${c.co} again`,
+    sub: `Day ${m[1]} reminder` + (m[2].startsWith('sent (')
+      ? ' — a practice run, so nothing really left this computer.' : ', sent for you.')
+  })],
+  [/^⏰ Follow-up due \(day (\d+)\)/, (m, c) => ({
+    // The day matters: without it the day 3, 5 and 10 reminders for the same
+    // company are three identical rows in the feed.
+    icon: '✋', tone: 'warn', text: `Time to nudge ${c.co}`,
+    sub: `Day ${m[1]} reminder — this one is yours to send, wherever you applied.`, cta: 'Show me'
+  })],
+  [/^✓ Day-(\d+) follow-up marked done/, (m, c) => ({
+    icon: '✓', tone: 'good', text: `You nudged ${c.co}`, sub: `Day ${m[1]} reminder, done by hand.`
+  })],
+  [/^No response after final follow-up/, (m, c) => ({
+    icon: '·', text: `No reply from ${c.co}`,
+    sub: "We asked three times and heard nothing, so we've stopped."
+  })],
+
+  // ---- applications going out --------------------------------------------
+  [/^Application (sent \(simulated\)|emailed to .+?) for/, (m, c) => ({
+    icon: '✉', text: `Applied to ${c.co} for you`,
+    sub: (c.job ? `${c.job.title} · ` : '') + (m[1].startsWith('sent (')
+      ? 'a practice run, so nothing really left this computer'
+      : 'your CV went with it as a PDF')
+  })],
+  [/^Batch send: (\d+) emailed for real, (\d+) simulated(?:, (\d+) expired postings skipped)?(?:, (\d+) failed)?/, m => {
+    const real = Number(m[1]), sim = Number(m[2]), gone = Number(m[3] || 0), bad = Number(m[4] || 0);
+    const total = real + sim;
+    const extra = [
+      gone ? `${pluralWords(gone, 'advert had', 'adverts had')} already closed` : '',
+      bad ? `${numWords(bad)} didn't go through` : ''
+    ].filter(Boolean).join(', ');
+    return {
+      icon: '✉',
+      text: total ? `Applied to ${plural(total, 'job', 'jobs')} for you` : 'Nothing went out this time',
+      sub: (total
+        ? (sim && !real ? 'A practice run — nothing really left this computer. ' : 'Your CV went with every one. ')
+          + "We'll remind them on day 3, 5 and 10."
+        : 'Nothing was ready to send.') + (extra ? ` ${capFirst(extra)}.` : '')
+    };
+  }],
+  // You sent these, so the nudges are yours too — we keep the diary, not the pen.
+  [/^✋→✓ You applied on the platform/, (m, c) => ({
+    icon: '✓', tone: 'good', text: `You applied to ${c.co} yourself`,
+    sub: "We're tracking it now, and we'll tell you when it's time to nudge them."
+  })],
+  [/^✋→✓ (\d+) platform applications? confirmed/, m => ({
+    icon: '✓', tone: 'good', text: `You applied to ${plural(Number(m[1]), 'job', 'jobs')} yourself`,
+    sub: "We'll remind you to nudge them on day 3, 5 and 10."
+  })],
+
+  // ---- finding jobs -------------------------------------------------------
+  [/^Batch fetch done: (\d+) new matches \((\d+) poor fits filtered\)/, m => {
+    const added = Number(m[1]), poor = Number(m[2]);
+    return {
+      icon: '\u{1F50D}',
+      text: added ? `Found ${plural(added, 'job', 'jobs')} that suit you` : 'Nothing new that suits you this time',
+      sub: poor ? `We read ${plural(poor, 'other', 'others')} and they weren't close enough.` : "We'll keep looking."
+    };
+  }],
+  [/^(?:Batch fetch|Job search|Auto search) "([\s\S]+?)" via (.+?): (\d+) good matches added/, m => ({
+    icon: '\u{1F50D}', text: `Looked for "${m[1]}" jobs`,
+    sub: `${plural(Number(m[3]), 'one that suits', 'that suit')} you, ${sourceWords(m[2]) || 'found for you'}.`
+  })],
+  [/^(?:Batch fetch|Job search|Auto search) "([\s\S]+?)": (\d+) jobs? found but ALL filtered out/, m => ({
+    icon: '\u{1F50D}', tone: 'warn',
+    text: `Found ${plural(Number(m[2]), 'job', 'jobs')} for "${m[1]}" — but not where you want to work`,
+    sub: 'Add more places, or allow older postings, under what you are looking for in Settings.'
+  })],
+  [/^(\d+) jobs approved for CV & email generation/, m => ({
+    icon: '·', text: `${plural(Number(m[1]), 'job is', 'jobs are')} ready for us to write`,
+    sub: 'Nothing for you to do.'
+  })],
+
+  // ---- writing ------------------------------------------------------------
+  [/^Batch generate: (\d+) tailored CVs & emails ready(?: \((\d+) corrected by fact-check\))?(?:, (\d+) for you to send yourself[^,]*)?(?:, (\d+) failed)?/, m => {
+    const done = Number(m[1]), fixed = Number(m[2] || 0), yours = Number(m[3] || 0), bad = Number(m[4] || 0);
+    return {
+      icon: '✍',
+      text: done ? `Wrote ${plural(done, 'application', 'applications')} for you` : 'Nothing to write just now',
+      sub: [
+        done ? 'Your real CV, reordered so each company sees what they asked for first.' : '',
+        fixed ? `We checked them against your CV and corrected ${numWords(fixed)}.` : '',
+        yours ? `${capFirst(numWords(yours))} of them are yours to send.` : '',
+        bad ? `${capFirst(numWords(bad))} didn't work — we'll try again.` : ''
+      ].filter(Boolean).join(' ')
+    };
+  }],
+  [/^Ready for you to send: (\d+) written and waiting/, m => ({
+    icon: '✋', tone: 'warn',
+    text: `${capFirst(pluralWords(Number(m[1]), 'application is', 'applications are'))} ready for you to send`,
+    sub: 'We wrote every one. Nothing was emailed — that part is yours.', cta: 'Show me', go: 'jobs'
+  })],
+  [/^Tailored CV \+ email generated for/, (m, c) => ({
+    icon: '✍', text: `Wrote your application for ${c.co}`,
+    sub: c.job ? c.job.title : 'A CV and a short message, ready for you to read.', cta: 'Read it'
+  })],
+  [/^Revised CV\/email for .+ per your feedback: "([\s\S]+)"$/, (m, c) => ({
+    icon: '✍', text: `Rewrote your application for ${c.co}`, sub: `You asked for: "${m[1]}"`, cta: 'Read it'
+  })],
+
+  // ---- your details -------------------------------------------------------
+  [/^CV uploaded \(([\s\S]+?)\) — profile extracted: (\d+) skills found/, m => ({
+    icon: '\u{1F4C4}', text: 'You added your CV',
+    sub: `We read it and picked out ${plural(Number(m[2]), 'thing', 'things')} you're good at.`
+  })],
+  [/^Profile edited and saved$/, () => ({
+    icon: '\u{1F4C4}', text: 'You changed your details', sub: 'Every application from now on uses them.'
+  })],
+  [/^New profile created/, () => ({
+    icon: '\u{1F4C4}', text: 'You started a second search', sub: 'Add a CV for it whenever you like.'
+  })],
+
+  // ---- settings -----------------------------------------------------------
+  [/^Setup finished/, () => ({
+    icon: '✓', tone: 'good', text: "You're all set up",
+    sub: 'From here we only ask when we genuinely need you.'
+  })],
+  [/^AI instruction for (.+?) added: "([\s\S]+)"$/, m => ({
+    icon: '⚙',
+    text: `You gave us a rule for ${({ 'job finding': 'finding jobs', 'CV writing': 'writing your CV', 'email writing': 'writing your messages' })[m[1]] || 'writing'}`,
+    sub: `"${m[2]}"`
+  })],
+  [/^AI connection test passed/, () => ({
+    icon: '⚙', tone: 'good', text: 'The writing is connected',
+    sub: 'We can read adverts and write your applications now.'
+  })],
+  [/^Settings updated$/, () => ({ icon: '⚙', text: 'You changed something in Settings' })],
+
+  // ---- reports ------------------------------------------------------------
+  [/^\u{1F4CA} Improvement report generated \(([\s\S]+?)\)(?: and emailed to (.+))?$/u, m => ({
+    icon: '\u{1F4CA}', text: 'We looked at how your search is going',
+    sub: m[2] ? `Sent to ${m[2]}.` : 'A short read on what is working and what is not.',
+    cta: 'Read it', go: 'report'
+  })],
+  [/^\u{1F4EE} Anonymous usage feedback/u, () => ({
+    icon: '\u{1F4EE}', text: 'Sent the anonymous usage numbers',
+    sub: 'Counts only — no names, no companies, no messages. You can switch this off in Settings.'
+  })],
+
+  // ---- things that did not work ------------------------------------------
+  [/^⚠️? Career page "([\s\S]+?)" — no public job board found/, m => ({
+    icon: '⚠', tone: 'warn', text: `We couldn't read ${m[1]}'s careers page`,
+    sub: "Big companies often run their own site that JobPilot can't read. Check the spelling in Settings, or take it off the list."
+  })],
+  [/^⚠️? Fetch skipped: (\d+) jobs already/, m => ({
+    icon: '⚠', tone: 'warn',
+    text: `We didn't look for more — ${plural(Number(m[1]), 'job is', 'jobs are')} already waiting`,
+    sub: "Work through the ones you have (or drop the ones you don't want), and we'll look again."
+  })],
+  [/^Skipped .+ — /, (m, c) => ({
+    icon: '·', text: `The ${c.co} advert had already closed`, sub: "So we didn't send anything."
+  })],
+  [/ moved to "([a-z_]+)"$/, (m, c) => ({
+    icon: '·', text: `${c.co} — ${HOME_MOVED_WORDS[m[1]] || 'moved on'}`,
+    sub: c.job ? c.job.title : ''
+  })],
+  [/^⚠/, () => ({
+    icon: '⚠', tone: 'warn', text: "One of the places we look didn't answer",
+    sub: 'Nothing is lost — we try again on the next round.'
+  })],
+
+  // ---- said better elsewhere: the run itself carries these ----------------
+  [/^Auto cycle complete:/, () => null],
+  [/^\u{1F4D2} Run complete/u, () => null]
+];
+
+// Anything the rules do not know is still said in words, never raw.
+const HOME_FALLBACK = {
+  search: { icon: '\u{1F50D}', text: 'We went looking for jobs for you' },
+  move: { icon: '·', text: 'One of your jobs moved on' },
+  apply: { icon: '✉', text: 'An application went out' },
+  tailor: { icon: '✍', text: 'We wrote one of your applications' },
+  cv: { icon: '\u{1F4C4}', text: 'Your details changed' },
+  settings: { icon: '⚙', text: 'Something in Settings changed' },
+  reply: { icon: '★', tone: 'good', text: 'A company got back to you' },
+  followup: { icon: '↻', text: 'We chased one of your applications' },
+  insights: { icon: '\u{1F4CA}', text: 'We looked at how your search is going' },
+  run: { icon: '✓', text: 'A round finished' },
+  error: {
+    icon: '⚠', tone: 'warn', text: "Something didn't work",
+    sub: 'Nothing is lost — we try again on the next round.'
+  },
+  info: { icon: '·', text: 'JobPilot was busy in the background' }
+};
+
+// The company's name is in the line itself — "…for Client Success Advisor at
+// Corvus Group — …" — which is what keeps a line readable after the job it was
+// about has been deleted ("Not interested" removes the record entirely).
+function companyInText(raw) {
+  // The name runs to the first punctuation, or to one of the few clauses the
+  // server appends straight after it with no punctuation in between.
+  const m = /\bat ([^—:"()]+?)(?:\s*[—:(]|\s+moved to\b|\s+closed\b|\s+per your feedback\b|[.!?]?\s*$)/.exec(String(raw));
+  const name = m ? m[1].trim() : '';
+  return name && name.length > 1 && name.length < 60 ? name : '';
+}
+
+function homeEvent(entry, apps) {
+  const raw = String(entry.text || '');
+  const job = findJobInText(raw, apps);
+  const co = job ? job.company : companyInText(raw);
+  const ctx = { job, co, raw };
+  for (const [re, build] of HOME_RULES) {
+    const m = re.exec(raw);
+    if (!m) continue;
+    // Every rule that takes a context uses the company's name in its sentence.
+    // Without one those read "Nudged them again" and "them — you applied", so
+    // we drop to the plain sentence for this kind of event instead: it names
+    // nobody, which is the honest thing when we no longer know who it was.
+    if (!co && build.length >= 2) break;
+    const out = build(m, ctx);
+    if (!out) return null;                       // deliberately not shown
+    return { at: entry.at, jobId: out.go ? '' : (job ? job.id : ''), ...out };
+  }
+  const fb = HOME_FALLBACK[entry.type] || HOME_FALLBACK.info;
+  return { at: entry.at, jobId: job ? job.id : '', ...fb };
+}
+
+// A finished round, from the run ledger rather than the activity feed.
+function homeRunEvent(r) {
+  const sent = (r.sent || 0) + (r.simulated || 0);
+  const bits = [
+    r.found ? `${r.found} found` : '',
+    r.tailored ? `${r.tailored} written` : '',
+    sent ? `${sent} sent` : '',
+    r.manualQueued ? `${r.manualQueued} left for you to send` : ''
+  ].filter(Boolean).join(' · ');
+  return {
+    at: r.endedAt || r.startedAt, icon: '✓', tone: 'good', jobId: '',
+    text: r.mode === 'auto' ? 'JobPilot ran a whole round on its own' : 'That round is finished',
+    sub: (bits || 'Nothing came of this one') + (r.costTotal ? ` · cost ${fmtMoney(r.costTotal)}` : '')
+  };
+}
+
+function homeTimeline(data) {
+  const apps = data.applications || [];
+  const out = [];
+  for (const entry of (data.stats && data.stats.activity) || []) {
+    const it = homeEvent(entry, apps);
+    if (it) out.push(it);
+  }
+  for (const r of data.runs || []) {
+    if (r.endedAt) out.push(homeRunEvent(r));
+  }
+  return out.sort((a, b) => b.at - a.at);
+}
+
+/* ---------------------------------------------------------------------------
+ * The screen
+ * ------------------------------------------------------------------------ */
+
+const FOLLOW_UP_DAYS_UI = [3, 5, 10];
+
+// Applications you made on a company's own site, where a nudge is due and only
+// you can send it.
+function homeNudgesDue(apps) {
+  const out = [];
+  for (const a of apps) {
+    // Not "has no address" — "JobPilot is not the one chasing this". Somebody
+    // who sends their own applications owns every nudge, address or not.
+    if (!a.appliedAt || chasedByUs(a) || a.replied) continue;
+    if (['replied', 'interview', 'offer', 'rejected', 'closed'].includes(a.status)) continue;
+    for (const day of FOLLOW_UP_DAYS_UI) {
+      if (Date.now() < a.appliedAt + day * 86400000) continue;
+      if ((a.followups || []).some(f => f.day === day)) continue;
+      out.push({ app: a, day });
+      break;
+    }
+  }
+  return out.sort((x, y) => x.app.appliedAt - y.app.appliedAt);
+}
+
+// Everything that genuinely wants a human, in the order it is worth doing.
+// `slot: true` means the big button itself belongs on that row.
+function homeNeedsItems(data) {
+  const apps = data.applications || [];
+  const items = [];
+  const mine = sendsHerself(data);
+  // "Ready" means ready for US to email. When the person sends, there is no such
+  // state — those are their own to send, and they join the rows below instead of
+  // being offered behind a button that would say "Send this application".
+  const ready = mine ? 0 : apps.filter(a => a.status === 'ready').length;
+  const towrite = apps.filter(a => ['discovered', 'approved'].includes(a.status)).length;
+
+  if (ready > 0) {
+    items.push({
+      icon: '✉', slot: true,
+      title: `${capFirst(pluralWords(ready, 'application is', 'applications are'))} written and ready`,
+      sub: `We email ${ready === 1 ? 'it' : 'each one'} from your address and chase it up. `
+        + 'Nothing goes to a company until you press the button.'
+    });
+  } else if (towrite > 0) {
+    items.push({
+      icon: '✍', slot: true,
+      title: `${capFirst(pluralWords(towrite, 'job is', 'jobs are'))} waiting for us to write`,
+      sub: "We rewrite your CV for each one and draft a short message to go with it. It takes about a minute."
+    });
+  }
+
+  // Anything written and waiting on the person: the companies with no address,
+  // plus — when they send their own — everything else that has been written.
+  const action = apps.filter(a => a.status === 'action' || (mine && a.status === 'ready'));
+  for (const a of action.slice(0, 4)) {
+    items.push({
+      job: a.id, initials: initialsOf(a.company), isJob: true,
+      title: `${a.title} at ${a.company}`,
+      sub: a.recipientEmail && mine
+        ? 'Written and waiting — the message and your CV are ready for you to send'
+        : a.tailored
+          ? 'They only take applications on their own site — everything is ready to paste in'
+          : 'They only take applications on their own site',
+      cta: a.recipientEmail && mine ? 'Send it' : 'Do it now'
+    });
+  }
+  if (action.length > 4) {
+    items.push({
+      icon: '✋', go: 'jobs', title: `${capFirst(numWords(action.length - 4))} more like these`,
+      sub: mine ? 'All written and waiting on you' : "All waiting on the companies' own forms", cta: 'Show me'
+    });
+  }
+
+  for (const { app: a, day } of homeNudgesDue(apps).slice(0, 3)) {
+    items.push({
+      job: a.id, initials: initialsOf(a.company), isJob: true,
+      title: `Time to nudge ${a.company}`,
+      sub: `You applied on their own site ${agoWords(a.appliedAt)} — the day ${day} reminder is yours to send`,
+      cta: 'Show me'
+    });
+  }
+  return items;
+}
+
+function homeNeedsRowHtml(it) {
+  const end = it.slot
+    ? '<span class="jp-home-slot" id="homeSmartSlot"></span>'
+    : `<button class="jp-btn jp-btn--primary jp-btn--sm">${esc(it.cta || 'Open')}</button>`;
+  const tap = it.job ? ` data-job="${esc(it.job)}" role="button" tabindex="0"`
+    : it.go ? ` data-go="${esc(it.go)}" role="button" tabindex="0"` : '';
+  const mark = it.initials
+    ? `<span class="jp-avatar">${esc(it.initials)}</span>`
+    : `<span class="jp-avatar jp-avatar--accent">${it.icon || '·'}</span>`;
+  return `
+    <div class="jp-row${it.job || it.go ? ' jp-row--tap' : ''}"${tap}>
+      ${mark}
+      <div class="jp-row-main">
+        <div class="jp-row-title">${esc(it.title)}</div>
+        <div class="jp-row-sub">${esc(it.sub || '')}</div>
+      </div>
+      <div class="jp-row-end">${end}</div>
+    </div>`;
+}
+
+function homeNeedsHtml(data, items) {
+  const first = homeFirstName(data);
+  const who = first ? `, ${esc(first)}` : '';
+  const n = items.length;
+  const mins = Math.max(2, Math.round(n * 1.5));
+  const allJobs = items.every(i => i.isJob);
+  const head = allJobs
+    ? `${capFirst(numWords(n))} ${n === 1 ? 'job is' : 'jobs are'} waiting on you${who}`
+    : `${capFirst(numWords(n))} ${n === 1 ? 'thing needs' : 'things need'} you${who}`;
+  return `
+    <div class="jp-card jp-card--accent jp-card--shadow jp-home-block">
+      <div class="jp-row-flex jp-home-eyebrow">
+        <span class="jp-eyebrow jp-eyebrow--accent">Needs you</span>
+        <span class="jp-note">· about ${mins} minutes</span>
+      </div>
+      <h2 class="jp-h2 jp-home-needs-head">${head}</h2>
+      <div class="jp-list jp-list--ruled">${items.map(homeNeedsRowHtml).join('')}</div>
+    </div>`;
+}
+
+// Nothing waiting is the normal state, and it should feel like good news.
+function homeCalmHtml(data) {
+  // Exactly the number on the "waiting to hear back" tile above — counted the
+  // same way, from the same place. Counting every `appliedAt` instead put
+  // "we're waiting on 3 companies and chasing them for you" under a tile
+  // reading 0, for three jobs that were closed and rejected.
+  const by = (data.stats && data.stats.byStatus) || {};
+  const out = (by.applied || 0) + (by.followup || 0);
+  const mine = sendsHerself(data);
+  const waiting = mine
+    ? `We're waiting to hear from ${plural(out, 'company', 'companies')}. We'll tell you when it's worth nudging them.`
+    : `We're waiting on ${plural(out, 'company', 'companies')} and chasing them for you. Anything that needs a person lands here.`;
+  return `
+    <div class="jp-card jp-card--quiet jp-home-block">
+      <div class="jp-row-flex">
+        <span class="jp-avatar jp-avatar--good">✓</span>
+        <div class="jp-row-main">
+          <div class="jp-h-sans">Nothing needs you right now</div>
+          <div class="jp-note">${out ? waiting
+      : 'Anything that needs a person will land here. Everything else we do ourselves.'}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function homeEmptyHtml(data) {
+  // Skipping the CV used to land here, on "Find my first jobs", which could only
+  // come back with an error. The CV is the thing that is actually missing, so
+  // that is what this state is about — and the big button asks for it.
+  if (!hasCv(data)) return `
+    <div class="jp-empty jp-home-block">
+      <div class="jp-empty-icon">📄</div>
+      <h2 class="jp-h2">First, your CV</h2>
+      <p class="jp-lede">It is the one thing we can't work without — every application we write starts
+        from it, and it is how we tell which jobs are worth your time. One file, one time.</p>
+      <span class="jp-home-slot" id="homeSmartSlot"></span>
+      <p class="jp-note jp-note--center jp-home-empty-note">PDF, Word or plain text. It stays on this
+        computer, and you can swap it for a better one whenever you like.</p>
+    </div>`;
+  return `
+    <div class="jp-empty jp-home-block">
+      <div class="jp-empty-icon">✈</div>
+      <h2 class="jp-h2">Nothing here yet — that's normal</h2>
+      <p class="jp-lede">Your first search takes about a minute. We'll look at company career
+        pages and free job boards, then show you what fits.</p>
+      <span class="jp-home-slot" id="homeSmartSlot"></span>
+      <p class="jp-note jp-note--center jp-home-empty-note">Nothing goes to a company until you say so.</p>
+    </div>`;
+}
+
+// The round in progress, as the comp's step checklist.
+function homeRunHtml(data) {
+  const r = data.currentRun;
+  const op = r && r.activeOp;
+  if (!op || !OP_LABELS[op]) return '';
+  const order = ['fetching', 'generating', 'sending'];
+  const at = order.indexOf(op);
+  const sent = (r.sent || 0) + (r.simulated || 0);
+  const steps = [
+    { text: 'Looking for jobs that suit you', note: r.found ? `${r.found} found` : '' },
+    { text: 'Writing your CV and message for each one', note: r.tailored ? `${r.tailored} written` : '' },
+    { text: 'Sending them off', note: sent ? `${sent} sent` : '' }
+  ].map((s, i) => {
+    const state = i === at ? 'now' : (i < at || s.note) ? 'done' : 'next';
+    return `
+      <div class="jp-row-flex jp-home-step is-${state}">
+        <span class="jp-home-step-mark">${state === 'done' ? '✓' : state === 'now' ? '•' : '·'}</span>
+        <span>${s.text}</span>
+        <span class="jp-note jp-spacer">${esc(s.note)}</span>
+      </div>`;
+  }).join('');
+
+  const secs = Math.max(0, Math.round((Date.now() - (r.activeSince || Date.now())) / 1000));
+  const elapsed = secs < 90 ? `${secs}s` : `${Math.round(secs / 60)} minutes so far`;
+  return `
+    <div class="jp-card jp-card--lg jp-home-block">
+      <div class="jp-row-flex jp-home-run-head">
+        <span class="jp-dot jp-dot--live"></span>
+        <div class="jp-h-sans">${esc(OP_LABELS[op].text)}…</div>
+        <span class="jp-note jp-spacer">${esc(elapsed)}</span>
+      </div>
+      ${steps}
+      <p class="jp-note jp-home-run-foot">You can close this — we'll keep going and tell you when it's done.</p>
+    </div>`;
+}
+
+function homeFeedHtml(items) {
+  const days = [];
+  for (const it of items) {
+    const label = dayLabel(it.at);
+    let day = days.find(d => d.label === label);
+    if (!day) { day = { label, items: [] }; days.push(day); }
+    if (day.items.length < 8) day.items.push(it);
+  }
+  const shown = days.slice(0, 3);
+  const html = shown.map(day => `
+      <div class="jp-home-day">
+        <div class="jp-eyebrow jp-tl-day">${esc(day.label)}</div>
+        ${day.items.map(it => {
+    const tap = it.jobId ? ` data-job="${esc(it.jobId)}" role="button" tabindex="0"`
+      : it.go ? ` data-go="${esc(it.go)}" role="button" tabindex="0"` : '';
+    return `
+          <div class="jp-tl-item">
+            <div class="jp-tl-rail">
+              <span class="jp-tl-icon${it.tone ? ' jp-tl-icon--' + it.tone : ''}">${it.icon || '·'}</span>
+              <div class="jp-tl-line"></div>
+            </div>
+            <div class="jp-tl-body">
+              <div class="jp-tl-card${it.tone === 'good' ? ' jp-tl-card--good' : ''}${tap ? ' jp-row--tap' : ''}"${tap}>
+                <div class="jp-row-main">
+                  <div class="jp-row-title jp-row-title--light">${esc(it.text)}</div>
+                  ${it.sub ? `<div class="jp-row-sub jp-row-sub--sm">${esc(it.sub)}</div>` : ''}
+                </div>
+                <span class="jp-row-meta">${esc(clockTime(it.at))}</span>
+                ${it.cta ? `<button class="jp-btn jp-btn--quiet jp-btn--xs">${esc(it.cta)}</button>` : ''}
+              </div>
+            </div>
+          </div>`;
+  }).join('')}
+      </div>`).join('');
+  return { days: shown.length, html };
+}
+
+// Move a control (never re-create one) into whichever slot the current layout
+// offers. Held by reference, because the slot it was in a moment ago may have
+// just been replaced.
+const homeSmartBtn = document.getElementById('smartBtn');
+function homePlace(el, slotId) {
+  const slot = document.getElementById(slotId);
+  if (el && slot && el.parentNode !== slot) slot.appendChild(el);
+}
+
+const homeShowing = { needs: null, run: null, feed: null, stats: null, head: null };
+
+function renderHome() {
+  const needs = document.getElementById('homeNeeds');
+  if (!needs) return;                    // Home's frame is not in the page
+  const data = JobPilot.data;
+  if (!data) return;                     // the frame's own skeleton is showing
+  const apps = data.applications || [];
+  const stats = data.stats || {};
+  const by = stats.byStatus || {};
+  const isEmpty = !apps.length;
+  const timeline = homeTimeline(data);
+
+  // ---- the greeting and the date line ----
+  const first = homeFirstName(data);
+  const hour = new Date().getHours();
+  const greeting = (hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening') + (first ? `, ${first}` : '');
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const todays = timeline.filter(it => dayLabel(it.at) === 'Today');
+  const since = todays.length ? todays[todays.length - 1].at : 0;
+  const dateLine = data.currentRun && data.currentRun.activeOp
+    ? `${today} · JobPilot is working on it right now`
+    : since ? `${today} · JobPilot has been working since ${clockTime(since)}`
+      : timeline.length ? `${today} · nothing has happened yet today`
+        : today;
+  if (greeting + dateLine !== homeShowing.head) {
+    homeShowing.head = greeting + dateLine;
+    document.getElementById('homeTitle').textContent = greeting;
+    document.getElementById('homeDate').textContent = dateLine;
+  }
+
+  // ---- three plain-word numbers ----
+  const statCards = isEmpty ? [] : [
+    { num: (by.applied || 0) + (by.followup || 0), label: 'waiting to hear back' },
+    { num: stats.interviews || 0, label: stats.interviews === 1 ? 'interview booked' : 'interviews booked' },
+    { num: stats.applied || 0, label: 'sent in total' }
+  ];
+  if (stats.offers) statCards.push({ num: stats.offers, label: stats.offers === 1 ? 'job offer' : 'job offers' });
+  const statsHtml = statCards.map(s =>
+    `<div><div class="jp-stat-num">${s.num}</div><div class="jp-stat-label">${esc(s.label)}</div></div>`).join('');
+  if (statsHtml !== homeShowing.stats) {
+    homeShowing.stats = statsHtml;
+    document.getElementById('homeStats').innerHTML = statsHtml;
+  }
+
+  // ---- the round in progress ----
+  const runHtml = homeRunHtml(data);
+  if (runHtml !== homeShowing.run) {
+    homeShowing.run = runHtml;
+    document.getElementById('homeRun').innerHTML = runHtml;
+  }
+
+  // ---- needs you / the empty state ----
+  const items = homeNeedsItems(data);
+  const needsHtml = isEmpty ? homeEmptyHtml(data)
+    : items.length ? homeNeedsHtml(data, items)
+      : homeCalmHtml(data);
+  if (needsHtml !== homeShowing.needs) {
+    homeShowing.needs = needsHtml;
+    needs.innerHTML = needsHtml;
+  }
+
+  // ---- the big button goes wherever the next thing to do is ----
+  homePlace(homeSmartBtn, document.getElementById('homeSmartSlot') ? 'homeSmartSlot' : 'homeRuleSlot');
+
+  // ---- what's been happening ----
+  //
+  // The rule row carries the app's two primary controls as well as this
+  // heading, so it is NEVER hidden: hiding it took "Find more jobs" and "Check
+  // for replies" off Home entirely, which is the state every brand-new user
+  // starts in. Only the heading and its divider come and go with the feed.
+  const feed = homeFeedHtml(timeline);
+  document.getElementById('homeRule').classList.toggle('jp-rule--bare', !timeline.length);
+  if (feed.html !== homeShowing.feed) {
+    homeShowing.feed = feed.html;
+    document.getElementById('homeFeed').innerHTML = feed.html;
+    document.getElementById('homeFeedFoot').innerHTML = feed.days
+      ? `That's the last ${feed.days === 1 ? 'day' : `${feed.days} days`}. <a href="#/jobs" data-go="jobs">See every job →</a>`
+      : '';
+  }
+  document.getElementById('homeMore').classList.toggle('jp-hidden', isEmpty && !timeline.length);
+}
+
+JobPilot.screens.register('home', { onEnter: renderHome });
+document.addEventListener('jobpilot:data', renderHome);
+
+// A "Needs you" line or a timeline card opens the one job panel. The jobs
+// screen has its own listener for its own rows; the two never overlap.
+document.addEventListener('click', e => {
+  const el = e.target.closest('#mount-home [data-job], #mount-report [data-job]');
+  if (el) openDrawer(el.dataset.job);
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest && e.target.closest('#mount-home [data-job], #mount-report [data-job]');
+  if (!el) return;
+  e.preventDefault();
+  openDrawer(el.dataset.job);
+});
+
+/* ===========================================================================
+ * HOW IT'S GOING — the same numbers the improvement report is built from, read
+ * out in a minute. Three parts, exactly as the comp: one sentence in serif,
+ * where your replies come from, and the two things most worth changing.
+ *
+ * The written report (the AI's own long version) is still here, folded away
+ * under the advice — it is honest about being longer and more technical.
+ * ======================================================================== */
+
+let reportInsights = null;      // /api/insights — reports + how often they run
+let reportInsightsTried = false;
+let reportShowing = null;
+
+// Where a job came from, grouped into names a person recognises.
+function reportSourceGroup(src) {
+  const s = String(src || '');
+  if (/career page/i.test(s)) return 'Company career pages';
+  if (/remotive|remoteok|arbeitnow/i.test(s)) return 'Free job boards';
+  if (/linkedin/i.test(s)) return 'LinkedIn';
+  if (/naukri/i.test(s)) return 'Naukri';
+  if (/adzuna/i.test(s)) return 'Adzuna';
+  return 'Somewhere else';
+}
+
+function reportBars(apps) {
+  const groups = new Map();
+  for (const a of apps) {
+    if (!a.appliedAt) continue;
+    const key = reportSourceGroup(a.source);
+    const g = groups.get(key) || { label: key, applied: 0, replied: 0 };
+    g.applied++;
+    if (a.replied || ['replied', 'interview', 'offer'].includes(a.status)) g.replied++;
+    groups.set(key, g);
+  }
+  const list = [...groups.values()].map(g => ({ ...g, rate: g.applied ? g.replied / g.applied : 0 }));
+  // The bar is each source's share of the replies, which is what the heading
+  // promises — not its reply rate. A rate bar would put "one out of one" above
+  // a career-page column built out of forty. The rate is what the sentence
+  // underneath is about.
+  const replies = list.reduce((n, g) => n + g.replied, 0);
+  list.sort((a, b) => b.replied - a.replied || b.applied - a.applied);
+  list.forEach((g, i) => {
+    g.width = replies ? Math.max(4, Math.round(g.replied / replies * 100)) : 4;
+    g.tone = !g.replied ? ' jp-bar-fill--warn' : i === 0 ? ' jp-bar-fill--good' : '';
+  });
+  return list;
+}
+
+// Only say "three times more often" when the numbers can carry it.
+function reportBarsNote(bars) {
+  const solid = bars.filter(b => b.applied >= 5).sort((a, b) => b.rate - a.rate);
+  if (solid.length < 2) return "Once a few more have gone out we can tell you which of these is worth your time.";
+  const [top, next] = solid;
+  if (!next.rate) {
+    return top.rate
+      ? `Everything that has come back so far came from ${top.label.toLowerCase()}.`
+      : "Nothing's come back from anywhere yet — early days.";
+  }
+  const times = top.rate / next.rate;
+  if (times < 1.5) return 'They are all replying at about the same rate so far.';
+  const word = times >= 2.5 && times < 3.5 ? 'three times' : times >= 3.5 ? `${numWords(Math.round(times))} times` : 'about twice';
+  return `${top.label} reply ${word} more often than ${next.label.toLowerCase()}.`;
+}
+
+function reportLeadSentence(data) {
+  const stats = data.stats || {};
+  const applied = stats.applied || 0;
+  const replies = stats.replied || 0;
+  const interviews = stats.interviews || 0;
+  if (!applied) {
+    return "Nothing has gone out yet, so there's nothing to read into. "
+      + "Once your first few applications are sent, this page tells you what's working and what isn't.";
+  }
+  if (!replies) {
+    return `Nobody has written back yet — ${numWords(applied)} ${applied === 1 ? 'application is' : 'applications are'} out there waiting. `
+      + (applied < 10
+        ? 'That is completely normal this early — replies usually take a week or two.'
+        : 'Two changes below are where the difference usually comes from.');
+  }
+  const rate = replies / applied * 100;
+  const judgement = applied < 10 ? "It's early days, so don't read too much into it yet."
+    : rate >= 15 ? "That's well above average for this kind of search."
+      : rate >= 8 ? "That's about average for this kind of search."
+        : "That's a little under average — the ideas below are where the difference usually comes from.";
+  return `${capFirst(numWords(replies))} of your ${applied === replies ? '' : 'last '}${numWords(applied)} `
+    + `${applied === 1 ? 'application' : 'applications'} got a reply`
+    + (interviews ? ` — and ${numWords(interviews)} turned into ${interviews === 1 ? 'an interview' : 'interviews'}` : '')
+    + `. ${judgement}`;
+}
+
+// The advice, from the real numbers. First two win, exactly as the comp.
+function reportAdvice(data, bars) {
+  const apps = data.applications || [];
+  const s = data.settings || {};
+  const stats = data.stats || {};
+  const applied = apps.filter(a => a.appliedAt);
+  const out = [];
+
+  const action = apps.filter(a => a.status === 'action').length;
+  if (action) {
+    out.push({
+      title: `${capFirst(pluralWords(action, 'job is', 'jobs are'))} waiting on you`,
+      sub: 'These companies only take applications on their own site. Each one is about two minutes, '
+        + 'and everything is written and ready to paste in.',
+      cta: 'Show me', go: 'jobs'
+    });
+  }
+
+  const simulated = applied.filter(a => a.applicationSent && a.applicationSent.simulated).length;
+  if (simulated && !s.smtpConfigured) {
+    out.push({
+      title: 'Nothing has actually been emailed yet',
+      sub: `Your email isn't connected, so ${pluralWords(simulated, 'application was', 'applications were')} a practice run — `
+        + 'written and filed, but never sent. Connect it and they go out for real.',
+      cta: 'Connect my email', go: 'settings'
+    });
+  }
+
+  const pages = bars.find(b => b.label === 'Company career pages');
+  const boards = bars.find(b => b.label === 'Free job boards');
+  const companies = String(s.atsCompanies || '').split(',').map(x => x.trim()).filter(Boolean).length;
+  if (pages && boards && pages.rate > boards.rate * 1.5 && companies < 25) {
+    out.push({
+      title: `Add ${companies ? 'five more companies you like' : 'a few companies you like'}`,
+      sub: `Applying straight to a company's own careers page gets you ${pages.rate > boards.rate * 2.5 ? 'about three times' : 'roughly twice'} `
+        + `the replies. You watch ${companies ? numWords(companies) : 'none'} at the moment — twenty-five is a good number.`,
+      cta: 'Add companies', go: 'settings'
+    });
+  }
+
+  const noAddress = applied.filter(a => !a.recipientEmail).length;
+  if (applied.length >= 5 && noAddress > applied.length / 2) {
+    out.push({
+      title: 'Most of these had nobody to email',
+      sub: `${capFirst(pluralWords(noAddress, 'application', 'applications'))} went out with no named person on the other end. `
+        + 'Career pages and LinkedIn adverts often name a hiring contact — those get read far more often.',
+      cta: 'Where we look', go: 'settings'
+    });
+  }
+
+  if (applied.length >= 3 && !(stats.followupsSent || 0)) {
+    out.push({
+      title: 'Nobody has been nudged yet',
+      sub: 'A short reminder on day 3, 5 and 10 is the single biggest thing that gets a reply. '
+        + 'We do it for you by email, and remind you about the ones you sent by hand.',
+      cta: 'Check for replies', go: 'home'
+    });
+  }
+
+  const avg = applied.length
+    ? Math.round(applied.reduce((n, a) => n + (a.matchScore || 0), 0) / applied.length) : 0;
+  if (applied.length >= 8 && avg < 65) {
+    out.push({
+      title: "You're applying for jobs that aren't a close fit",
+      sub: "On the whole these adverts asked for things your CV doesn't say you have. "
+        + 'Narrowing what you are looking for gets fewer jobs, and more replies.',
+      cta: 'Change what I want', go: 'settings'
+    });
+  }
+
+  if (!out.length) {
+    out.push({
+      title: 'Nothing needs changing yet',
+      sub: "Keep going — once forty or fifty applications are out we can tell what's working and what isn't.",
+      cta: 'See my jobs', go: 'jobs'
+    });
+  }
+  return out.slice(0, 2);
+}
+
+function reportRunsHtml(runs) {
+  const rows = (runs || []).filter(r => r.endedAt).slice(0, 8).map(r => {
+    const sent = (r.sent || 0) + (r.simulated || 0);
+    const bits = [
+      r.found ? `${r.found} found` : '',
+      r.tailored ? `${r.tailored} written` : '',
+      sent ? `${sent} sent` : ''
+    ].filter(Boolean).join(' · ') || 'nothing came of it';
+    return `
+      <div class="jp-row">
+        <div class="jp-row-main">
+          <div class="jp-row-title jp-row-title--light">${esc(dayLabel(r.endedAt))} at ${esc(clockTime(r.endedAt))}</div>
+          <div class="jp-row-sub jp-row-sub--sm">${esc(bits)}${r.mode === 'auto' ? ' · JobPilot did this one on its own' : ''}</div>
+        </div>
+        <span class="jp-row-meta">${fmtMoney(r.costTotal || 0)}</span>
+      </div>`;
+  }).join('');
+  return rows || '<p class="jp-note">Nothing has run yet.</p>';
+}
+
+function reportScreenHtml(data) {
+  const apps = data.applications || [];
+  const stats = data.stats || {};
+  if (!apps.length) {
+    return `
+      <div class="jp-page">
+        <h1 class="jp-title">How it's going</h1>
+        <p class="jp-lede jp-report-lede">Read in a minute. Written for you, not for a spreadsheet.</p>
+        <div class="jp-empty">
+          <div class="jp-empty-icon">📊</div>
+          <h2 class="jp-h2">Nothing to say yet — that's normal</h2>
+          <p class="jp-lede">Once your first applications are out, this page tells you which ones are
+            getting replies, and the one or two things worth changing.</p>
+          <button class="jp-btn jp-btn--primary" data-go="home">Start on the home page</button>
+        </div>
+      </div>`;
+  }
+
+  const bars = reportBars(apps);
+  const advice = reportAdvice(data, bars);
+  const cost = stats.costTotalUSD || 0;
+  const followups = stats.followupsSent || 0;
+  const applied = stats.applied || 0;
+  const reports = (reportInsights && reportInsights.reports) || [];
+  const latest = reports[0];
+
+  const barsHtml = bars.length ? bars.map(b => `
+    <div class="jp-bar">
+      <div class="jp-bar-head"><span>${esc(b.label)}</span><span class="jp-muted">${b.replied} of ${b.applied}</span></div>
+      <div class="jp-bar-track"><div class="jp-bar-fill${b.tone}" style="width:${b.width}%"></div></div>
+    </div>`).join('') + `<p class="jp-note jp-report-note">${esc(reportBarsNote(bars))}</p>`
+    : '<p class="jp-note">Nothing has gone out yet, so there is nothing to compare.</p>';
+
+  return `
+    <div class="jp-page">
+      <h1 class="jp-title">How it's going</h1>
+      <p class="jp-lede jp-report-lede">Read in a minute. Written for you, not for a spreadsheet.</p>
+
+      <div class="jp-card jp-card--lg jp-report-lead">
+        <p class="jp-lead-serif">${esc(reportLeadSentence(data))}</p>
+      </div>
+
+      <div class="jp-grid-2 jp-report-grid">
+        <div class="jp-card">
+          <h2 class="jp-h-sans--sm jp-report-h">Where your replies come from</h2>
+          ${barsHtml}
+        </div>
+        <div class="jp-card">
+          <h2 class="jp-h-sans--sm jp-report-h">${advice.length === 1 ? 'One thing worth changing' : 'Two things worth changing'}</h2>
+          ${advice.map(a => `
+            <div class="jp-report-advice">
+              <div class="jp-row-title jp-row-title--light">${esc(a.title)}</div>
+              <div class="jp-row-sub">${esc(a.sub)}</div>
+              <button class="jp-btn jp-btn--quiet jp-btn--xs jp-report-cta" data-go="${esc(a.go)}">${esc(a.cta)}</button>
+            </div>`).join('')}
+        </div>
+      </div>
+
+      <div class="jp-card jp-card--quiet jp-card--tight jp-report-cost">
+        <details class="jp-report-details">
+          <summary class="jp-report-cost-head">
+            <div class="jp-row-main">
+              <div class="jp-h-sans--sm">${cost
+    ? `Everything so far has cost you ${fmtMoney(cost)}`
+    : "It hasn't cost you anything so far"}</div>
+              <div class="jp-note">${applied ? `${plural(applied, 'application', 'applications')}, ` : ''}${followups
+    ? `${plural(followups, 'nudge', 'nudges')}, ` : ''}${applied || followups
+    // With nothing sent yet both counts are empty, and a bare "and all the
+    // reading…" is the first thing a new user reads on this screen.
+    ? 'and all the reading and writing in between'
+    : 'That covers all the reading and the writing'}. Sending email is free.</div>
+            </div>
+            <span class="jp-btn jp-btn--secondary jp-btn--sm jp-spacer">See the details</span>
+          </summary>
+          <div class="jp-list jp-list--flat jp-report-runs">${reportRunsHtml(data.runs)}</div>
+        </details>
+      </div>
+
+      <div class="jp-card jp-report-long">
+        <div class="jp-row-flex">
+          <div class="jp-row-main">
+            <div class="jp-h-sans--sm">${latest ? 'The longer write-up' : 'Want a longer write-up?'}</div>
+            <div class="jp-note">${latest
+    ? `Written ${agoWords(latest.at)} by the same writer that does your applications. More detail than this page, and a little more technical.`
+    : "We can go through everything you've sent and write you a longer, more detailed read."}</div>
+          </div>
+          <button class="jp-btn jp-btn--secondary jp-btn--sm jp-spacer" id="reportRunNow" data-needs-ai>Have another look</button>
+        </div>
+        ${latest ? `
+          <details class="jp-report-details jp-report-body">
+            <summary class="jp-note">Read it</summary>
+            <div class="jp-doc jp-doc--sm jp-doc--scroll">${esc(latest.body || '')}</div>
+          </details>` : ''}
+      </div>
+    </div>`;
+}
+
+function renderReportScreen() {
+  const mount = JobPilot.mount('report');
+  if (!mount) return;
+  const data = JobPilot.data;
+  if (!data) return;                       // the frame's own skeleton is showing
+  const html = reportScreenHtml(data);
+  if (html === reportShowing) return;
+  reportShowing = html;
+  mount.innerHTML = html;
+}
+
+// The written reports are not part of the shared snapshot — one fetch when the
+// screen is first opened, and again after a new one is written. No polling.
+async function reportLoadInsights() {
+  try {
+    reportInsights = await api('/api/insights');
+    reportShowing = null;
+    renderReportScreen();
+  } catch { /* the page reads fine without the long version */ }
+}
+
+JobPilot.screens.register('report', {
+  onEnter() {
+    renderReportScreen();
+    if (!reportInsightsTried) { reportInsightsTried = true; reportLoadInsights(); }
+  }
+});
+document.addEventListener('jobpilot:data', () => {
+  if (JobPilot.screens.current() === 'report') renderReportScreen();
+});
+
+// "Have another look" — the old sidebar's "Generate report now".
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('#reportRunNow');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="jp-spinner"></span>Reading it all…';
+  try {
+    const r = await api('/api/insights/run', { method: 'POST' });
+    toast(r.emailed ? `Done — we also sent it to ${r.to}.` : 'Done — it is at the bottom of this page.');
+    await reportLoadInsights();
+    await refresh();
+  } catch (err) {
+    toast(err.message, true);
+    btn.disabled = false;
+    btn.textContent = 'Have another look';
+  }
+});
