@@ -1,0 +1,40 @@
+# Netlify configuration for the JobPilot landing page.
+#
+# The site is the `site/` folder and nothing else — plain HTML, CSS, one small
+# script, the bundled fonts and the app icons. There is no build step, no
+# dependency install and no framework, so `command` is deliberately empty.
+#
+# Note that `site/` is the public *website*. `public/` is the JobPilot app
+# itself, which runs on the user's own computer and is never deployed here.
+
+[build]
+  publish = "site"
+  command = ""
+
+# Long-lived caching for the fingerprint-free static assets. The fonts and icons
+# never change under the same name; the HTML must not be cached hard or a
+# redeploy (a new video ID, say) would not reach people who already visited.
+[[headers]]
+  for = "/fonts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/icons/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Sensible defaults. The page loads nothing from anywhere else, so these cost
+# nothing — but note frame-src has to allow YouTube for the video embed once a
+# video ID is set in index.html.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "SAMEORIGIN"

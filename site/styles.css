@@ -1,0 +1,430 @@
+/* ===========================================================================
+ * JobPilot — landing page stylesheet
+ *
+ * Deliberately self-contained: no build step, no framework, no CDN. The
+ * palette is the app's own token set (public/styles.css), ported verbatim so
+ * the site and the product feel like one thing. The one difference is how dark
+ * mode is chosen: the app switches on [data-theme="dark"], this page follows
+ * the visitor's OS via prefers-color-scheme.
+ *
+ * Order:
+ *   1  Fonts
+ *   2  Tokens
+ *   3  Base + layout primitives
+ *   4  Header / footer
+ *   5  Hero
+ *   6  Video
+ *   7  Cards, steps, lists
+ *   8  Responsive
+ * ======================================================================== */
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ---------------------------------------------------------------------------
+ * 1 · Fonts — bundled, not fetched (same woff2 files the app ships).
+ * ------------------------------------------------------------------------ */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url('fonts/instrument-sans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url('fonts/instrument-sans-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url('fonts/instrument-serif-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url('fonts/instrument-serif-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------------------
+ * 2 · Tokens. Light is the default; dark is the same swap the app makes.
+ *     Contrast was checked: ink/ink2/accent on every surface they land on
+ *     clear WCAG AA (4.5:1) in both themes.
+ * ------------------------------------------------------------------------ */
+:root {
+  --bg: oklch(0.985 0.008 85);
+  --surface: oklch(1 0 0);
+  --surface2: oklch(0.965 0.012 85);
+  --line: oklch(0.905 0.012 85);
+  --ink: oklch(0.26 0.015 60);
+  --ink2: oklch(0.52 0.015 60);
+  --accent: oklch(0.55 0.14 250);
+  --accentSoft: oklch(0.955 0.03 250);
+  --good: oklch(0.53 0.14 150);
+  --goodSoft: oklch(0.955 0.035 150);
+  --warn: oklch(0.58 0.13 60);
+  --warnSoft: oklch(0.96 0.04 60);
+  --shadow: 0 1px 2px oklch(0.26 0.015 60 / .06), 0 8px 24px oklch(0.26 0.015 60 / .06);
+  --shadow-lg: 0 2px 4px oklch(0.26 0.015 60 / .05), 0 18px 48px oklch(0.26 0.015 60 / .10);
+
+  --font-ui: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+
+  --radius: 12px;
+  --radius-card: 18px;
+  --radius-card-lg: 20px;
+  --radius-pill: 999px;
+  --page-w: 1000px;
+  --page-w-narrow: 740px;
+  --pad-x: 24px;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(0.19 0.012 265);
+    --surface: oklch(0.235 0.014 265);
+    --surface2: oklch(0.28 0.016 265);
+    --line: oklch(0.34 0.016 265);
+    --ink: oklch(0.95 0.008 265);
+    --ink2: oklch(0.73 0.014 265);
+    --accent: oklch(0.74 0.13 250);
+    --accentSoft: oklch(0.30 0.05 250);
+    --good: oklch(0.75 0.13 150);
+    --goodSoft: oklch(0.30 0.05 150);
+    --warn: oklch(0.80 0.12 70);
+    --warnSoft: oklch(0.31 0.05 70);
+    --shadow: 0 1px 2px oklch(0 0 0 / .3), 0 10px 30px oklch(0 0 0 / .35);
+    --shadow-lg: 0 2px 6px oklch(0 0 0 / .35), 0 20px 50px oklch(0 0 0 / .45);
+
+    color-scheme: dark;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 3 · Base
+ * ------------------------------------------------------------------------ */
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Visible focus everywhere, on the accent which clears 3:1 against every
+   surface it can sit on. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+img { max-width: 100%; height: auto; display: block; }
+ul, ol { list-style: none; }
+
+/* Skip link — first thing a keyboard user meets. */
+.skip {
+  position: absolute; left: 12px; top: -60px; z-index: 100;
+  background: var(--accent); color: var(--surface);
+  padding: 10px 18px; border-radius: var(--radius); font-weight: 600;
+  transition: top .15s ease;
+}
+.skip:focus { top: 12px; text-decoration: none; }
+
+/* ---- layout primitives -------------------------------------------------- */
+.wrap { max-width: var(--page-w); margin: 0 auto; padding: 0 var(--pad-x); }
+.wrap--narrow { max-width: var(--page-w-narrow); }
+
+section { padding: 68px 0; }
+section + section { border-top: 1px solid var(--line); }
+
+.sec-head { margin-bottom: 32px; }
+.sec-head p { color: var(--ink2); max-width: 60ch; margin-top: 10px; font-size: 17px; }
+
+/* ---- type --------------------------------------------------------------- */
+h1, h2, h3 { font-weight: 400; letter-spacing: -.015em; }
+h1 {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 7.5vw, 4.1rem);
+  line-height: 1.03;
+}
+h2 {
+  font-family: var(--font-display);
+  font-size: clamp(1.9rem, 4.6vw, 2.6rem);
+  line-height: 1.12;
+}
+/* Card and step headings are sans — the app does the same inside cards. */
+h3 { font-family: var(--font-ui); font-size: 18px; font-weight: 600; letter-spacing: 0; line-height: 1.35; }
+
+.eyebrow {
+  font-size: 13px; font-weight: 600; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink2);
+}
+.lede { color: var(--ink2); font-size: clamp(1.05rem, 2.4vw, 1.28rem); line-height: 1.5; }
+.note { color: var(--ink2); font-size: 14.5px; line-height: 1.55; }
+.prose p { color: var(--ink2); font-size: 17px; }
+.prose p + p { margin-top: 14px; }
+.prose strong { color: var(--ink); font-weight: 600; }
+
+/* ---- buttons ------------------------------------------------------------ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  border: 1px solid transparent; cursor: pointer;
+  border-radius: var(--radius); padding: 15px 26px;
+  font-size: 16px; font-weight: 600; line-height: 1.2;
+  background: var(--surface2); color: var(--ink);
+  transition: filter .15s ease, border-color .15s ease, transform .15s ease;
+  text-align: left;
+}
+.btn:hover { text-decoration: none; filter: brightness(.97); transform: translateY(-1px); }
+@media (prefers-color-scheme: dark) { .btn:hover { filter: brightness(1.12); } }
+.btn--primary { background: var(--accent); color: var(--surface); }
+.btn--primary:hover { color: var(--surface); }
+.btn--secondary { background: var(--surface); border-color: var(--line); color: var(--ink); }
+.btn--secondary:hover { color: var(--ink); border-color: var(--ink2); }
+.btn--sm { padding: 10px 18px; font-size: 15px; font-weight: 500; border-radius: 10px; }
+
+/* Download buttons carry a platform label above a small "what you get" line. */
+.btn-dl { flex-direction: row; align-items: center; padding: 14px 24px; }
+.btn-dl .btn-ico { flex-shrink: 0; width: 22px; height: 22px; }
+.btn-dl b { display: block; font-size: 16px; font-weight: 600; }
+.btn-dl span { display: block; font-size: 13px; font-weight: 400; opacity: .82; line-height: 1.3; }
+
+.btns { display: flex; flex-wrap: wrap; gap: 12px; }
+
+/* ---------------------------------------------------------------------------
+ * 4 · Header / footer
+ * ------------------------------------------------------------------------ */
+.site-header { border-bottom: 1px solid var(--line); background: var(--bg); }
+.site-header .wrap {
+  display: flex; align-items: center; gap: 16px;
+  padding-top: 14px; padding-bottom: 14px;
+}
+.logo {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-family: var(--font-display); font-size: 24px; color: var(--ink);
+  letter-spacing: -.01em;
+}
+.logo:hover { text-decoration: none; }
+.logo-mark {
+  display: grid; place-items: center; width: 28px; height: 28px;
+  border-radius: 9px; background: var(--accent); color: var(--surface);
+  font-family: var(--font-ui); font-size: 14px; font-weight: 600; line-height: 1;
+}
+.site-header nav { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+.site-footer { border-top: 1px solid var(--line); padding: 40px 0 56px; }
+.site-footer .wrap {
+  display: flex; flex-wrap: wrap; gap: 14px 26px; align-items: center;
+}
+.site-footer p { color: var(--ink2); font-size: 14.5px; }
+.site-footer .foot-links { margin-left: auto; display: flex; gap: 20px; flex-wrap: wrap; }
+.site-footer .foot-links a { font-size: 14.5px; }
+
+/* ---------------------------------------------------------------------------
+ * 5 · Hero
+ * ------------------------------------------------------------------------ */
+.hero { padding: clamp(48px, 8vw, 86px) 0 clamp(44px, 6vw, 68px); border-top: none; }
+.hero .eyebrow { margin-bottom: 18px; }
+.hero h1 { max-width: 15ch; }
+.hero .lede { margin-top: 22px; max-width: 56ch; }
+.hero .btns { margin-top: 32px; }
+.hero .hero-fine { margin-top: 18px; max-width: 52ch; }
+
+/* The "what it does" beats, right under the hero copy. */
+.beats { margin-top: 44px; display: grid; gap: 12px; }
+.beat { display: flex; gap: 14px; align-items: flex-start; }
+.beat-dot {
+  flex-shrink: 0; margin-top: 3px; width: 26px; height: 26px; border-radius: 9px;
+  background: var(--accentSoft); color: var(--accent);
+  display: grid; place-items: center; font-size: 13px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.beat p { font-size: 16.5px; }
+.beat p b { font-weight: 600; }
+.beat p span { color: var(--ink2); }
+
+/* A plain, honest platform notice — matters most on a phone. */
+.platform-note {
+  margin-top: 26px; display: flex; gap: 12px; align-items: flex-start;
+  background: var(--surface2); border: 1px solid var(--line);
+  border-radius: var(--radius-card); padding: 16px 18px; max-width: 56ch;
+}
+.platform-note svg { flex-shrink: 0; width: 20px; height: 20px; margin-top: 1px; color: var(--ink2); }
+.platform-note p { font-size: 15px; color: var(--ink2); }
+.platform-note strong { color: var(--ink); font-weight: 600; }
+
+/* ---------------------------------------------------------------------------
+ * 6 · Video — responsive 16:9, self-contained placeholder until an ID is set.
+ * ------------------------------------------------------------------------ */
+.video {
+  position: relative; aspect-ratio: 16 / 9; width: 100%;
+  border-radius: var(--radius-card-lg); overflow: hidden;
+  background: var(--surface2); border: 1px solid var(--line);
+}
+.video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* Placeholder state. Not a black box and not an error — a deliberate panel.
+   It drops the fixed 16:9 ratio and grows to fit its own text instead: at 375px
+   a 16:9 box is only ~188px tall and the copy was being cut in half. The ratio
+   comes back as soon as there is room for it, so adding the real video later
+   barely moves the layout. */
+.video--empty {
+  aspect-ratio: auto;
+  min-height: 250px;
+  border-style: dashed; border-width: 1.5px;
+  display: grid; place-items: center; text-align: center; padding: 30px 22px;
+}
+@media (min-width: 560px) {
+  .video--empty { aspect-ratio: 16 / 9; min-height: 0; }
+}
+.video--empty .video-inner { max-width: 34ch; }
+.video-play {
+  width: 58px; height: 58px; border-radius: var(--radius-pill);
+  background: var(--accentSoft); color: var(--accent);
+  display: grid; place-items: center; margin: 0 auto 16px;
+}
+.video-play svg { width: 24px; height: 24px; margin-left: 3px; }
+.video--empty h3 { margin-bottom: 6px; }
+.video--empty p { color: var(--ink2); font-size: 15px; }
+
+/* ---------------------------------------------------------------------------
+ * 7 · Cards, steps, lists
+ * ------------------------------------------------------------------------ */
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-card); padding: 24px;
+}
+.card h3 { margin-bottom: 8px; }
+.card p { color: var(--ink2); font-size: 15.5px; }
+.card--quiet { background: var(--surface2); }
+.card--lg { border-radius: var(--radius-card-lg); padding: 30px 32px; box-shadow: var(--shadow); }
+
+.grid { display: grid; gap: 16px; }
+.grid--2 { grid-template-columns: repeat(2, 1fr); }
+.grid--3 { grid-template-columns: repeat(3, 1fr); }
+
+/* Card icon chip. Colour lives on the chip, never on body text over a soft
+   fill — the soft pairs are below 4.5:1 in light mode. */
+.chip {
+  width: 38px; height: 38px; border-radius: 11px; margin-bottom: 14px;
+  display: grid; place-items: center;
+  background: var(--accentSoft); color: var(--accent);
+}
+.chip svg { width: 19px; height: 19px; }
+.chip--good { background: var(--goodSoft); color: var(--good); }
+.chip--warn { background: var(--warnSoft); color: var(--warn); }
+
+/* ---- numbered steps ----------------------------------------------------- */
+.steps { counter-reset: step; display: grid; gap: 4px; }
+.step {
+  counter-increment: step;
+  display: grid; grid-template-columns: 42px 1fr; gap: 18px;
+  padding: 20px 0; border-top: 1px solid var(--line);
+}
+.step:first-child { border-top: none; padding-top: 4px; }
+.step::before {
+  content: counter(step);
+  grid-row: span 2;
+  width: 34px; height: 34px; border-radius: var(--radius-pill);
+  background: var(--accent); color: var(--surface);
+  display: grid; place-items: center;
+  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.step-body h3 { margin-bottom: 6px; }
+.step-body p { color: var(--ink2); font-size: 16px; }
+.step-body p + p { margin-top: 8px; }
+.step-body strong { color: var(--ink); font-weight: 600; }
+
+/* A callout inside a step — used for the macOS Gatekeeper warning, which is
+   the single most likely place for someone to give up. */
+.callout {
+  margin-top: 14px; border-radius: var(--radius);
+  border: 1px solid var(--line); border-left: 3px solid var(--warn);
+  background: var(--warnSoft); padding: 14px 16px;
+}
+.callout p { color: var(--ink); font-size: 15px; }
+.callout p + p { margin-top: 8px; }
+.callout .callout-title { font-weight: 600; margin-bottom: 4px; }
+
+/* Inline key caps / literal file names. */
+.kbd {
+  font-family: var(--font-ui); font-size: .92em; font-weight: 600;
+  background: var(--surface2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 1px 6px; white-space: nowrap; color: var(--ink);
+}
+
+/* ---- tick / cross lists ------------------------------------------------- */
+.ticks { display: grid; gap: 11px; margin-top: 4px; }
+.ticks li { display: flex; gap: 11px; align-items: flex-start; font-size: 16px; }
+.ticks svg { flex-shrink: 0; width: 18px; height: 18px; margin-top: 3px; color: var(--good); }
+.ticks li span { color: var(--ink2); }
+.ticks li b { font-weight: 600; color: var(--ink); }
+
+/* ---- the honest-status list -------------------------------------------- */
+/* The bullet is positioned, not a flex item. These items are a bold lead-in
+   followed by a bare text node, so `display:flex` made the <b> its own flex
+   item and squeezed it into a narrow column beside the rest of the sentence. */
+.status-list { display: grid; gap: 14px; }
+.status-list li {
+  position: relative; padding-left: 20px;
+  font-size: 16px; color: var(--ink2);
+}
+.status-list li::before {
+  content: ""; position: absolute; left: 0; top: 10px;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--warn);
+}
+.status-list b { color: var(--ink); font-weight: 600; }
+
+/* ---- the closing download band ----------------------------------------- */
+.band { text-align: center; }
+.band h2 { margin-bottom: 14px; }
+.band .lede { margin: 0 auto; max-width: 46ch; }
+.band .btns { justify-content: center; margin-top: 30px; }
+.band .note { margin-top: 20px; }
+
+/* ---------------------------------------------------------------------------
+ * 8 · Responsive. The app is desktop-only; this page is not — most people
+ *     meet it on a phone first. Everything below is checked at 375px.
+ * ------------------------------------------------------------------------ */
+@media (max-width: 860px) {
+  .grid--3 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  :root { --pad-x: 20px; }
+  section { padding: 52px 0; }
+  .grid--2, .grid--3 { grid-template-columns: 1fr; }
+
+  /* Full-width tap targets — easier to hit, and they stop the two buttons
+     wrapping into a ragged pair. */
+  .btns { flex-direction: column; align-items: stretch; }
+  .btn { width: 100%; }
+  .band .btns { align-items: stretch; }
+
+  .step { grid-template-columns: 34px 1fr; gap: 14px; }
+  .step::before { width: 30px; height: 30px; font-size: 14px; }
+
+  .site-footer .wrap { flex-direction: column; align-items: flex-start; }
+  .site-footer .foot-links { margin-left: 0; gap: 16px; }
+
+  .card--lg { padding: 24px 20px; }
+}
+
+@media (max-width: 380px) {
+  .site-header .wrap { gap: 10px; }
+  .logo { font-size: 21px; }
+  .btn--sm { padding: 9px 14px; font-size: 14px; }
+}

@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>JobPilot — a job-application autopilot that runs on your own computer</title>
+<meta name="description" content="JobPilot finds jobs that fit you, writes a tailored CV and message for each one, sends them or hands them to you, then chases the follow-ups and reads the replies. Free, open source, and it all runs on your own Mac or Windows computer.">
+
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+<meta name="theme-color" content="#fdfaf4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111419" media="(prefers-color-scheme: dark)">
+
+<!-- Social preview. The image is a purpose-made 1200x630 card
+     (icons/social-card.png), which is the shape every platform wants, so the
+     card type is "summary_large_image". Regenerate it with
+     `node scripts/generate-social-card.js` after changing the mark or palette.
+
+     The image path is root-relative, which Netlify serves fine and which most
+     scrapers resolve against the page URL. If a preview ever comes up blank on
+     a fussy platform, make these two absolute by putting your full domain in
+     front, e.g. https://jobpilot.example.com/icons/social-card.png -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="JobPilot — a job-application autopilot that runs on your own computer">
+<meta property="og:description" content="Finds jobs that fit you, writes a tailored CV and message for each one, sends them or hands them to you, then chases the follow-ups. Free, open source, runs on your own machine.">
+<meta property="og:image" content="/icons/social-card.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The JobPilot paper-plane mark beside the word JobPilot.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="JobPilot — a job-application autopilot that runs on your own computer">
+<meta name="twitter:description" content="Finds jobs that fit you, writes a tailored CV and message for each one, sends them or hands them to you, then chases the follow-ups. Free, open source, runs on your own machine.">
+<meta name="twitter:image" content="/icons/social-card.png">
+<meta name="twitter:image:alt" content="The JobPilot paper-plane mark beside the word JobPilot.">
+
+<link rel="preload" href="fonts/instrument-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/instrument-serif-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="styles.css">
+
+<script>
+/* ===========================================================================
+ * SITE CONFIG — the only two things you are likely to want to change.
+ * Both are one-line edits. Nothing else in the page needs touching.
+ * ======================================================================== */
+
+/* 1 · THE YOUTUBE VIDEO ─────────────────────────────────────────────────────
+ *
+ *    Put the video ID between the quotes, save, redeploy. That is the whole job.
+ *
+ *    The ID is the short code after "v=" in a normal YouTube link:
+ *        https://www.youtube.com/watch?v=dQw4w9WgXcQ   ->   "dQw4w9WgXcQ"
+ *        https://youtu.be/dQw4w9WgXcQ                  ->   "dQw4w9WgXcQ"
+ *    Paste ONLY that code, not the whole URL.
+ *
+ *    While it is left empty (as below) the page shows a tidy "walkthrough is
+ *    coming" panel instead, and makes no request to YouTube at all.
+ */
+const VIDEO_ID = "";
+
+/* 2 · THE DOWNLOAD LINK ─────────────────────────────────────────────────────
+ *
+ *    Both download buttons — macOS and Windows — point at this one URL.
+ *
+ *    Right now it is GitHub's "download the whole project as a ZIP" link, which
+ *    is a real working download today. When there is a proper tagged release
+ *    build, replace this single line with its URL, for example:
+ *        https://github.com/jawa-zaidi/job-pilot/releases/latest/download/JobPilot.zip
+ *
+ *    (The same URL is also written into each button's href in the markup, so the
+ *    buttons still work if a visitor has JavaScript turned off. The script at the
+ *    bottom of this page overwrites those hrefs from this constant on load, so
+ *    editing here is enough for every normal visitor.)
+ */
+const DOWNLOAD_URL = "https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip";
+
+/* ===================== end of the bits you need to edit ================== */
+</script>
+</head>
+
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="logo" href="#top"><span class="logo-mark" aria-hidden="true">J</span>JobPilot</a>
+    <nav aria-label="Primary">
+      <a class="btn btn--sm btn--secondary" href="https://github.com/jawa-zaidi/job-pilot">GitHub</a>
+      <a class="btn btn--sm btn--primary" href="#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ===================================================================== -->
+  <!-- Hero                                                                  -->
+  <!-- ===================================================================== -->
+  <section class="hero" id="top">
+    <div class="wrap">
+      <p class="eyebrow">Free &middot; open source &middot; runs on your own computer</p>
+
+      <h1>Your job search, flown on autopilot.</h1>
+
+      <p class="lede">
+        JobPilot finds jobs that actually fit you, writes a CV and a message tailored to each
+        one, sends them &mdash; or hands them to you ready to send &mdash; then chases the
+        follow-ups and tells you when someone replies.
+      </p>
+
+      <div class="btns" id="download-top">
+        <a class="btn btn--primary btn-dl" data-download
+           href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
+          <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="12" rx="2"></rect>
+            <path d="M2 20h20"></path>
+          </svg>
+          <span>
+            <b>Download for macOS</b>
+            <span>ZIP &middot; then right-click &rarr; Open</span>
+          </span>
+        </a>
+
+        <a class="btn btn--secondary btn-dl" data-download
+           href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
+          <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+            <path d="M3 12h18M12 4v16"></path>
+          </svg>
+          <span>
+            <b>Download for Windows</b>
+            <span>ZIP &middot; then run JobPilot.bat</span>
+          </span>
+        </a>
+      </div>
+
+      <p class="note hero-fine">
+        Both buttons download the same file: the JobPilot project as a ZIP. Nothing is installed
+        on your machine by this page &mdash; you unzip the folder and double-click one file inside it.
+      </p>
+
+      <div class="platform-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"></circle>
+          <path d="M12 11v5M12 8h.01"></path>
+        </svg>
+        <p>
+          <strong>JobPilot runs on a Mac or a Windows computer</strong>, not on a phone. If you are
+          reading this on your phone, send yourself this link and open it on your laptop when you
+          get the chance &mdash; the download is only useful there.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- Video                                                                 -->
+  <!-- ===================================================================== -->
+  <section id="watch">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Watch it work</h2>
+        <p>A short walkthrough: downloading it, starting it, and sending the first applications.</p>
+      </div>
+
+      <!-- The script at the bottom of the page swaps this placeholder for the real
+           YouTube embed as soon as VIDEO_ID has something in it. With no ID set,
+           what you see below is all there is — and no request leaves the page. -->
+      <div class="video video--empty" id="video-slot">
+        <div class="video-inner">
+          <div class="video-play" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5.5v13l11-6.5z"></path>
+            </svg>
+          </div>
+          <h3>The walkthrough is being recorded</h3>
+          <p>It will appear here shortly. The written steps below are complete on their own in the meantime.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- What it does                                                          -->
+  <!-- ===================================================================== -->
+  <section id="what">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>What it actually does</h2>
+        <p>
+          One round is: find, write, send, then keep chasing. You can press the button yourself,
+          or leave JobPilot to run rounds on its own.
+        </p>
+      </div>
+
+      <div class="grid grid--3">
+        <article class="card">
+          <div class="chip" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>
+            </svg>
+          </div>
+          <h3>Finds jobs that fit</h3>
+          <p>
+            Pulls openings straight from company career pages and free job boards, scores each one
+            against your CV, and drops duplicates, reposts and expired listings.
+          </p>
+        </article>
+
+        <article class="card">
+          <div class="chip" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path>
+              <path d="M14 3v5h5M9 13h6M9 17h4"></path>
+            </svg>
+          </div>
+          <h3>Rewrites your CV for each one</h3>
+          <p>
+            A version of your CV tailored to that specific job, then a second pass that strips out
+            anything it invented, checked against what your real CV actually says.
+          </p>
+        </article>
+
+        <article class="card">
+          <div class="chip" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6h16v12H4z"></path><path d="m4 7 8 6 8-6"></path>
+            </svg>
+          </div>
+          <h3>Writes the message that goes with it</h3>
+          <p>
+            The covering email, written for that role and that company &mdash; not a template with
+            the company name dropped into a gap.
+          </p>
+        </article>
+
+        <article class="card">
+          <div class="chip chip--good" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 4 3 11l7 3 3 7z"></path><path d="M21 4 10 14"></path>
+            </svg>
+          </div>
+          <h3>Sends it &mdash; or hands it to you</h3>
+          <p>
+            Where the posting gives a recruiter address, JobPilot emails it from your own Gmail with
+            the CV attached as a PDF. Where you have to apply on the company's own site, it lands in
+            <em>Needs you</em> with everything written and ready to copy.
+          </p>
+        </article>
+
+        <article class="card">
+          <div class="chip chip--warn" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>
+            </svg>
+          </div>
+          <h3>Chases the follow-ups</h3>
+          <p>
+            Nudges on days 3, 5 and 10, and stops the moment somebody replies. The timings are real
+            dates, so they survive you closing the app or moving to a new computer.
+          </p>
+        </article>
+
+        <article class="card">
+          <div class="chip" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path>
+            </svg>
+          </div>
+          <h3>Reads the replies, tells you what's working</h3>
+          <p>
+            Sorts incoming mail into good news and rejections, and gives you a one-minute read on
+            which sources are actually replying and what is worth changing.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- Setup                                                                 -->
+  <!-- ===================================================================== -->
+  <section id="setup">
+    <div class="wrap wrap--narrow">
+      <div class="sec-head">
+        <h2>Getting it running</h2>
+        <p>
+          About five minutes, most of which is the computer doing things by itself. There is nothing
+          to type into a terminal, and you are never asked for an API key to get started.
+        </p>
+      </div>
+
+      <ol class="steps">
+        <li class="step">
+          <div class="step-body">
+            <h3>Download the ZIP and unpack it</h3>
+            <p>
+              Use either button above &mdash; they give you the same file. On a Mac, double-click the
+              downloaded ZIP. On Windows, right-click it and choose <span class="kbd">Extract All</span>.
+              Open the folder that appears.
+            </p>
+          </div>
+        </li>
+
+        <li class="step">
+          <div class="step-body">
+            <h3>Start it &mdash; one double-click</h3>
+            <p>
+              <strong>On a Mac:</strong> find <span class="kbd">JobPilot.command</span> in the folder,
+              <strong>right-click it, choose Open, then click Open again</strong> in the box that appears.
+            </p>
+            <div class="callout">
+              <p class="callout-title">Do not just double-click it the first time</p>
+              <p>
+                macOS will say JobPilot <em>&ldquo;cannot be opened because it is from an unidentified
+                developer&rdquo;</em> and refuse to run it. That looks like the app is broken. It isn't
+                &mdash; it is macOS being careful about software that hasn't been through Apple's paid
+                signing process, which this project has not. Right-click &rarr; Open &rarr; Open is the
+                way past it, and <strong>you only ever have to do it once.</strong>
+              </p>
+            </div>
+            <p style="margin-top:14px">
+              <strong>On Windows:</strong> double-click <span class="kbd">JobPilot.bat</span>. Windows may
+              show its own "unrecognised app" warning; choose <em>More info</em> &rarr; <em>Run anyway</em>.
+            </p>
+          </div>
+        </li>
+
+        <li class="step">
+          <div class="step-body">
+            <h3>Let it set itself up</h3>
+            <p>
+              A plain black window appears and does the rest by itself &mdash; roughly a minute, and only
+              the first time. <strong>Leave that window open:</strong> it is JobPilot running. Closing it,
+              or pressing <span class="kbd">Ctrl</span>+<span class="kbd">C</span> in it, quits the app.
+            </p>
+            <p>
+              JobPilot needs <strong>Node.js</strong> on the computer &mdash; it is free, and it is the only
+              thing you have to install separately. If it isn't there, the window tells you so in plain words
+              and opens the download page for you, so you never have to go looking. Install it, then
+              double-click JobPilot again.
+            </p>
+          </div>
+        </li>
+
+        <li class="step">
+          <div class="step-body">
+            <h3>JobPilot opens in Chrome</h3>
+            <p>
+              It opens itself in its own Chrome window at <span class="kbd">localhost:4310</span> &mdash; that
+              address is your own computer, not a website. If something else is already using that port,
+              JobPilot quietly moves to the next free one and tells you which. If you don't have Chrome it
+              opens in your normal browser instead and everything still works.
+            </p>
+          </div>
+        </li>
+
+        <li class="step">
+          <div class="step-body">
+            <h3>Answer five questions</h3>
+            <p>
+              One at a time, with a <em>Skip</em> link on every one: what to call you; your CV (drag the file
+              in &mdash; PDF, Word or text); the kind of job you're after; where you'd like to work; and who
+              presses send &mdash; JobPilot, or you.
+            </p>
+            <p>
+              It shows you what it understood from your CV before anything else happens, so you can catch it
+              being wrong early.
+            </p>
+          </div>
+        </li>
+
+        <li class="step">
+          <div class="step-body">
+            <h3>Press the big button</h3>
+            <p>
+              Its label always tells you what it will do next: <em>Find my first jobs</em>, then
+              <em>Write N applications</em>, then <em>Send N applications</em>, and round again. The first time
+              a run needs to read a job advert, JobPilot asks you to connect an AI writer &mdash; that is
+              covered below.
+            </p>
+          </div>
+        </li>
+      </ol>
+
+      <div class="card card--quiet" style="margin-top:26px">
+        <h3>Starting it after that</h3>
+        <p>
+          On a Mac, that first run creates a <span class="kbd">JobPilot.app</span> next to the other files
+          &mdash; double-click that from then on and there's no black window at all. You can drag it into your
+          Applications folder. On Windows, the first successful run puts a JobPilot shortcut on your Desktop
+          and in the Start Menu.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- Install as an app                                                     -->
+  <!-- ===================================================================== -->
+  <section id="install-app">
+    <div class="wrap wrap--narrow">
+      <div class="sec-head">
+        <h2>Keep it in your Dock</h2>
+        <p>Optional, and it takes one click.</p>
+      </div>
+
+      <div class="prose">
+        <p>
+          Once JobPilot is running, it offers to install itself as a proper app: a small bar appears at the
+          top of the Home screen saying <em>&ldquo;Keep JobPilot in your Dock&rdquo;</em>. Press
+          <strong>Install it</strong>, confirm Chrome's <em>Install app?</em> box, and you get a Dock or
+          Taskbar icon and a clean window with no tabs and no address bar. Chrome's own menu does the same
+          thing: <span class="kbd">&#8942;</span> &rarr; <em>Cast, save and share</em> &rarr;
+          <em>Install page as app</em>.
+        </p>
+        <p>
+          <strong>This is the window, not the engine.</strong> Your data lives on your computer and is served
+          by JobPilot itself, so you still start it the normal way first &mdash; installing just gives you a
+          nicer window to look at it in. Safari doesn't offer this; on iOS,
+          <em>Share &rarr; Add to Home Screen</em> gets you the icon.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- Costs and requirements                                                -->
+  <!-- ===================================================================== -->
+  <section id="cost">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>What it costs, what it needs</h2>
+        <p>
+          JobPilot itself is free and open source (MIT), and there is no account to make and nothing to pay
+          the developer, ever. What it does need is somewhere to do the writing.
+        </p>
+      </div>
+
+      <div class="grid grid--2">
+        <article class="card card--lg">
+          <h3>The AI writer &mdash; pick one</h3>
+          <ul class="ticks" style="margin-top:14px">
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+              <span><b>Already pay for Claude Pro or Max?</b> Then there is nothing more to pay and no key to
+              paste. JobPilot uses the Claude Code app you're already signed into on that computer. Honest
+              caveat: it isn't free so much as <em>included</em> &mdash; it spends the same monthly usage
+              allowance you use talking to Claude yourself, and a big batch gets through it quickly.</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+              <span><b>Otherwise, a free Groq key.</b> Two minutes to set up, no card, and JobPilot gives you
+              the link and a box to paste it into at the moment it needs one.</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+              <span><b>Or a paid OpenAI or Anthropic key</b>, if you'd rather. Roughly a few dollars per
+              hundred applications, and JobPilot logs what every round actually cost.</span>
+            </li>
+          </ul>
+        </article>
+
+        <article class="card card--lg">
+          <h3>Everything else</h3>
+          <ul class="ticks" style="margin-top:14px">
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+              <span><b>A Mac or Windows computer.</b> Not a phone or a tablet.</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+              <span><b>Node.js, installed once.</b> Free. The launcher checks for it, explains it, and opens
+              the download page if it's missing.</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+              <span><b>Gmail is optional.</b> Connect it and JobPilot sends applications and follow-ups for
+              you and reads the replies. Leave it out and JobPilot still writes every CV and every message
+              &mdash; you just send them yourself. Nothing is worse for choosing that.</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+              <span><b>The job sources are free.</b> Company career pages and the free boards need no key and
+              no account, and career pages get the best replies anyway.</span>
+            </li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- Privacy                                                               -->
+  <!-- ===================================================================== -->
+  <section id="privacy">
+    <div class="wrap wrap--narrow">
+      <div class="sec-head">
+        <h2>Your CV never leaves your computer</h2>
+        <p>Not a marketing line &mdash; it is a consequence of how the thing is built.</p>
+      </div>
+
+      <ul class="ticks">
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+          <span><b>There is no JobPilot server.</b> You run the whole thing yourself. It listens on
+          <span class="kbd">127.0.0.1</span> &mdash; your machine only &mdash; so nothing else, even on your own
+          home network, can reach it unless you deliberately turn that on.</span>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+          <span><b>Your data sits in one folder</b> &mdash; <span class="kbd">JobPilotData</span> in your home
+          directory. Your CV, your applications, your history, all of it. Copy that folder to a new computer
+          and everything is back. Delete it and JobPilot has nothing.</span>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+          <span><b>It only talks to the services you set up yourself</b> &mdash; the AI provider you chose, your
+          own Gmail, and the job boards you switched on. Your CV goes to your AI provider because that is the
+          only way it can be rewritten; it does not go anywhere the developer can see.</span>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+          <span><b>Nothing is reported back unless you turn it on.</b> There is an off-by-default setting that
+          emails the developer aggregate counts &mdash; how many jobs were found, which sources, error
+          categories, costs. No names, no companies, no job titles, no email contents. Because it sends from
+          your own Gmail, the developer would see your address, so it is content-anonymous rather than fully
+          anonymous. It stays off until you switch it on.</span>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>
+          <span><b>Even the typefaces are bundled.</b> The app makes no call to a font CDN on launch, and works
+          with the network unplugged.</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- Honest status                                                         -->
+  <!-- ===================================================================== -->
+  <section id="status">
+    <div class="wrap wrap--narrow">
+      <div class="sec-head">
+        <h2>Where it's up to</h2>
+        <p>
+          JobPilot is new &mdash; version 0.1 &mdash; and has not been tested end to end. It is worth knowing
+          what is well-trodden and what isn't before you rely on it.
+        </p>
+      </div>
+
+      <ul class="status-list">
+        <li><b>The Windows path is less tested than the Mac one.</b> The macOS launcher has been run many
+          times, including with Node.js deliberately missing. The Windows launcher and its shortcut scripts
+          were written and reviewed carefully but have not been run on a real Windows machine. Expect to hit
+          something.</li>
+        <li><b>No real application email has been sent yet.</b> Saving your Gmail details, the test-send button
+          and the failure messages all work; an actual application leaving an actual inbox has not been
+          watched. Treat your first send as the test.</li>
+        <li><b>Pasted API keys are the least-travelled route.</b> The Claude subscription path has been driven
+          against a real signed-in setup and does produce real scoring and real writing. A pasted Groq, OpenAI
+          or Anthropic key has not been run end to end.</li>
+        <li><b>The Chrome "Install app?" dialog hasn't been eyeballed.</b> Everything up to the moment Chrome
+          takes over is verified; the native box and the resulting Dock icon are not.</li>
+        <li><b>macOS will not open it without the right-click step</b>, because there is no paid Apple signing
+          certificate behind this project. A signed build is on the list.</li>
+      </ul>
+
+      <p class="note" style="margin-top:24px">
+        If you hit something, the code is all there &mdash;
+        <a href="https://github.com/jawa-zaidi/job-pilot/issues">open an issue on GitHub</a> and it can be fixed.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- Closing download band                                                 -->
+  <!-- ===================================================================== -->
+  <section id="download" class="band">
+    <div class="wrap wrap--narrow">
+      <h2>Give it a go</h2>
+      <p class="lede">
+        Download it, double-click one file, answer five questions. Nothing to sign up for and no key to find.
+      </p>
+
+      <div class="btns">
+        <a class="btn btn--primary btn-dl" data-download
+           href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
+          <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="12" rx="2"></rect>
+            <path d="M2 20h20"></path>
+          </svg>
+          <span>
+            <b>Download for macOS</b>
+            <span>ZIP &middot; then right-click &rarr; Open</span>
+          </span>
+        </a>
+
+        <a class="btn btn--secondary btn-dl" data-download
+           href="https://github.com/jawa-zaidi/job-pilot/archive/refs/heads/main.zip">
+          <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+            <path d="M3 12h18M12 4v16"></path>
+          </svg>
+          <span>
+            <b>Download for Windows</b>
+            <span>ZIP &middot; then run JobPilot.bat</span>
+          </span>
+        </a>
+      </div>
+
+      <p class="note">
+        Runs on a Mac or Windows computer &middot; needs Node.js once &middot;
+        <a href="https://github.com/jawa-zaidi/job-pilot">source on GitHub</a>
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>JobPilot &mdash; free and open source under the MIT licence. It runs on your computer, not ours.</p>
+    <div class="foot-links">
+      <a href="https://github.com/jawa-zaidi/job-pilot">GitHub</a>
+      <a href="https://github.com/jawa-zaidi/job-pilot/issues">Report a problem</a>
+      <a href="#top">Back to top</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* The only script on the page. It does two small things, both driven by the two
+   constants at the top of this file:
+     1 · swaps the video placeholder for a real embed once VIDEO_ID is filled in
+     2 · points every download button at DOWNLOAD_URL
+   With no VIDEO_ID set, the page makes no external request at all. */
+(function () {
+  "use strict";
+
+  // 1 · The video.
+  var id = (typeof VIDEO_ID === "string" ? VIDEO_ID : "").trim();
+  var slot = document.getElementById("video-slot");
+  // Only accept the shape of a real YouTube ID, so a pasted full URL (a very easy
+  // mistake) leaves the tidy placeholder up rather than building a broken embed.
+  if (slot && /^[A-Za-z0-9_-]{6,20}$/.test(id)) {
+    var frame = document.createElement("iframe");
+    frame.src = "https://www.youtube-nocookie.com/embed/" + encodeURIComponent(id) + "?rel=0";
+    frame.title = "JobPilot walkthrough video";
+    frame.loading = "lazy";
+    frame.allow = "accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+    frame.allowFullscreen = true;
+    frame.referrerPolicy = "strict-origin-when-cross-origin";
+    slot.textContent = "";
+    slot.appendChild(frame);
+    slot.classList.remove("video--empty");
+  }
+
+  // 2 · The download buttons.
+  if (typeof DOWNLOAD_URL === "string" && DOWNLOAD_URL) {
+    var links = document.querySelectorAll("a[data-download]");
+    for (var i = 0; i < links.length; i++) links[i].href = DOWNLOAD_URL;
+  }
+})();
+</script>
+</body>
+</html>
