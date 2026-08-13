@@ -1620,6 +1620,1170 @@ applyNavState();
 $('#settingsBtn')?.addEventListener('click', () => JobPilot.screens.go('settings'));
 
 /* ===========================================================================
+ * SETTINGS — four cards, and one collapsed "Advanced".
+ *
+ * The old settings window was one scroll of thirty-odd fields under headings
+ * like "AI provider & model". This is the same thirty-odd fields, but each of
+ * the four things a person actually cares about is a card that says, in plain
+ * words, what it is set to right now — and everything else sits in "Advanced",
+ * shut, until somebody goes looking for it.
+ *
+ * Nothing was dropped on the way. Every control the old window had lives in one
+ * of these, and every one of them still posts to the same /api/settings with
+ * the same field names:
+ *
+ *   Your CV and details  → the "You" screen (name, CV, what you do)
+ *   What you're looking for → jobTitles · jobLocations · remoteOk · atsCompanies
+ *                             dailyTarget · maxJobAgeDays · preferLowCompetition
+ *                             autoSearch · autoSearchHours
+ *   Sending applications → sendingMode · fromName · smtpUser · smtpPass · test
+ *   The writer           → provider (the Claude subscription included) · model
+ *                          groqKey · openaiKey · anthropicKey · test
+ *   Advanced             → sources · apifyToken · adzuna* · promptFind/CV/Email
+ *                          factCheck · autoMinScore · companyCooldownDays · mode
+ *                          insights* · devFeedbackEnabled · dataDir · reset
+ * ======================================================================== */
+
+// What each writer falls back to with the model box left empty. Model names are
+// the one place a real name has to appear — there is no plainer word for them.
+const SET_MODEL_HINTS = {
+  groq: 'Leave it empty for llama-3.3-70b-versatile, the one we recommend. llama-3.1-8b-instant is quicker and rougher.',
+  openai: 'Leave it empty for gpt-4o-mini, the one we recommend. gpt-4o writes better and costs more.',
+  anthropic: 'Leave it empty for claude-haiku-4-5-20251001, the cheap one. claude-sonnet-5 writes the best CVs.',
+  claude_code: 'Leave it empty for claude-haiku-4-5, the lightest on your usage limits. claude-sonnet-5 writes better CVs at no extra charge.'
+};
+
+// Which card / advanced row is open. Kept out of the DOM so a background
+// refresh can decide not to redraw over somebody who is halfway through typing.
+// `touched` records that they have opened or closed a card themselves, which is
+// what stops "the writer" from re-opening itself under them (see below).
+let setUi = { card: null, row: null, adv: false, touched: false };
+let setProfile = null;      // last /api/profile — the CV card and the You screen
+let setProfileLoaded = false;
+
+const setMsg = (kind, text, isErr) => {
+  const el = document.querySelector(`[data-set-msg="${kind}"]`);
+  if (el) { el.textContent = text; el.classList.toggle('jp-set-msg--err', !!isErr); }
+};
+const setVal = id => ($('#' + id)?.value ?? '').trim();
+const setOn = id => !!$('#' + id)?.checked;
+
+async function setLoadProfile(force = false) {
+  if (setProfileLoaded && !force) return setProfile;
+  try {
+    setProfile = (await api('/api/profile')).profile || null;
+    setProfileLoaded = true;
+  } catch { /* keep whatever we had; the card says "no CV yet" either way */ }
+  return setProfile;
+}
+
+/* ---- The four state lines, in plain words -------------------------------- */
+
+const setCount = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+function setWordsCv(p) {
+  if (!p || !p.name) return { text: "No CV yet — we can't write anything until there is one", tone: 'warn' };
+  const bits = [p.title || "you haven't said what you do"];
+  if (p.years_experience) bits.push(`${p.years_experience} years`);
+  return { text: `${p.name} · ${bits.join(', ')}`, tone: '' };
+}
+
+function setWordsLooking(s) {
+  const titles = (s.jobTitles || []).length;
+  const places = (s.jobLocations || []).length;
+  const what = titles ? `Looking for ${setCount(titles, 'kind of job', 'kinds of job')}` : 'Looking for whatever suits your CV';
+  const where = places ? `in ${setCount(places, 'place', 'places')}` : 'anywhere in the world';
+  return { text: `${what} ${where} · up to ${s.dailyTarget} at a time`, tone: '' };
+}
+
+function setWordsSending(s) {
+  if (s.sendingMode !== 'jobpilot') return { text: 'You send them yourself — we write every one', tone: '' };
+  if (s.smtpConfigured) return { text: `Sending as ${s.smtpUser}`, tone: 'good' };
+  if (s.smtpUser) return { text: `Ready to send as ${s.smtpUser} — we just need the password Google gives apps`, tone: 'warn' };
+  return { text: "We'll send them, but we don't have your email address yet", tone: 'warn' };
+}
+
+function setWordsWriter(s, stats) {
+  const total = stats ? stats.costTotalUSD : 0;
+  const spent = total ? ` · ${fmtCost(total)} spent so far` : ' · nothing spent so far';
+  if (s.provider === 'claude_code' && s.claudeCode && s.claudeCode.available) {
+    return { text: `Your Claude subscription — nothing more to pay${spent}`, tone: 'good' };
+  }
+  if (!s.llmReady) {
+    return { text: 'Nobody is writing for you yet — this is the one thing still worth doing', tone: 'warn' };
+  }
+  const names = { groq: 'A free key from Groq', openai: 'Your OpenAI key', anthropic: 'Your Claude key from Anthropic' };
+  return { text: `${names[s.provider] || 'Your own key'}${spent}`, tone: '' };
+}
+
+/* ---- The page ------------------------------------------------------------ */
+
+const setToneClass = t => t === 'good' ? ' jp-set-state--good' : t === 'warn' ? ' jp-set-state--warn' : '';
+
+// `c.attn` marks a card as unfinished — an accent border, an eyebrow above the
+// title and a primary button, so it can never be mistaken for a card that is
+// already set up. Only "the writer" uses it, and only until one is connected.
+function setCardHtml(c, body) {
+  const open = setUi.card === c.id;
+  const tone = c.attn && !open ? 'jp-btn--primary' : 'jp-btn--secondary';
+  return `
+    <div class="jp-card jp-set-card${c.attn ? ' jp-card--accent' : ''}">
+      <div class="jp-set-head">
+        <span class="jp-avatar jp-avatar--${c.tone}" aria-hidden="true">${c.icon}</span>
+        <div class="jp-set-main">
+          ${c.attn ? `<span class="jp-eyebrow jp-eyebrow--accent jp-set-eyebrow">${c.attn}</span>` : ''}
+          <div class="jp-h-sans--sm">${c.title}</div>
+          <div class="jp-set-sub">${c.sub}</div>
+          <div class="jp-set-state${setToneClass(c.state.tone)}">${esc(c.state.text)}</div>
+        </div>
+        ${c.go
+          ? `<button type="button" class="jp-btn jp-btn--secondary jp-btn--sm" data-go="${c.go}">${c.cta}</button>`
+          : `<button type="button" class="jp-btn ${tone} jp-btn--sm" data-set-card="${c.id}"
+               aria-expanded="${open}">${open ? 'Close' : c.cta}</button>`}
+      </div>
+      ${open && body ? `<div class="jp-set-body">${body()}</div>` : ''}
+    </div>`;
+}
+
+function setSaveRowHtml(kind, extra = '') {
+  return `
+    <div class="jp-set-actions">
+      <button type="button" class="jp-btn jp-btn--primary jp-btn--sm" data-set-save="${kind}">Save</button>
+      ${extra}
+      <span class="jp-note" data-set-msg="${kind}" aria-live="polite"></span>
+    </div>`;
+}
+
+function setLookingBody(s) {
+  return `
+    <label class="jp-field">
+      <span class="jp-field-label">The kinds of job you want</span>
+      <input class="jp-input jp-input--sm" id="setTitles" value="${esc((s.jobTitles || []).join(', '))}"
+        placeholder="e.g. Frontend Engineer, React Developer">
+      <span class="jp-field-help">Everyday words are fine — separate them with commas. Leave it empty and
+        we'll go by what your CV says.</span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">Where you'd like to work</span>
+      <input class="jp-input jp-input--sm" id="setPlaces" value="${esc((s.jobLocations || []).join(', '))}"
+        placeholder="e.g. Bangalore, India">
+      <span class="jp-field-help">Towns, cities or countries, separated by commas. This is the thing that
+        keeps jobs to the places you want — leave it empty and jobs from anywhere in the world turn up.</span>
+    </label>
+    <label class="jp-check">
+      <input type="checkbox" id="setRemote" ${s.remoteOk ? 'checked' : ''}>
+      <span>Also bring me jobs I can do from home
+        <span class="jp-field-help">Untick to hide anything advertised as remote.</span></span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">Companies you'd like to work for</span>
+      <textarea class="jp-textarea jp-textarea--md" id="setCompanies" rows="2"
+        placeholder="stripe, razorpay, postman">${esc(s.atsCompanies || '')}</textarea>
+      <span class="jp-field-help">We watch these companies' own careers pages, which is where replies come
+        from most often. Use the short name that appears in their careers web address, separated by commas.
+        Very big companies usually run a careers site we can't read — if we can't find one, we say so in
+        the activity list.</span>
+    </label>
+    <div class="jp-inline">
+      <span>Bring back up to</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="setTarget" type="number" min="1" max="200"
+        value="${Number(s.dailyTarget) || 50}">
+      <span>jobs each time we look</span>
+    </div>
+    <p class="jp-note jp-inline-note">One look = find, write, send. Jobs already waiting on you don't count
+      towards it.</p>
+    <div class="jp-inline">
+      <span>Only jobs put up in the last</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="setMaxAge" type="number" min="1" max="90"
+        value="${Number(s.maxJobAgeDays) || 30}">
+      <span>days</span>
+    </div>
+    <p class="jp-note jp-inline-note">Fresh postings have far fewer people applying — a week or two is a
+      good spot.</p>
+    <label class="jp-check">
+      <input type="checkbox" id="setLowComp" ${s.preferLowCompetition ? 'checked' : ''}>
+      <span>Prefer jobs hardly anyone has applied to
+        <span class="jp-field-help">Only LinkedIn tells us this one — it means fewer than ten people so far.</span></span>
+    </label>
+    <label class="jp-check">
+      <input type="checkbox" id="setAutoSearch" ${s.autoSearch ? 'checked' : ''}>
+      <span>Keep looking on your own, without me pressing anything
+        <span class="jp-field-help">We have a look every few hours and put anything good on your board.</span></span>
+    </label>
+    <div class="jp-inline">
+      <span>Have a look every</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="setAutoHours" type="number" min="1" max="24"
+        value="${Number(s.autoSearchHours) || 6}">
+      <span>hours</span>
+    </div>
+    ${setSaveRowHtml('looking')}`;
+}
+
+function setSendingBody(s) {
+  const mine = s.sendingMode !== 'jobpilot';
+  return `
+    <button type="button" class="jp-choice${mine ? '' : ' is-on'}" data-send="jobpilot">
+      <div class="jp-choice-title">JobPilot sends them for me</div>
+      <div class="jp-choice-sub">We email each application from your address and chase it up after 3, 5 and
+        10 days. Replies come straight back to you, and we spot them.</div>
+    </button>
+    <button type="button" class="jp-choice${mine ? ' is-on' : ''}" data-send="myself">
+      <div class="jp-choice-title">I'll send them myself</div>
+      <div class="jp-choice-sub">We still write every CV and message and remind you when to follow up. You
+        press send. Perfectly fine choice.</div>
+    </button>
+    <div id="setMailBox" class="${mine ? 'jp-hidden' : ''}">
+      <label class="jp-field">
+        <span class="jp-field-label">Your name, as it should appear on the email</span>
+        <input class="jp-input jp-input--sm" id="setFromName" value="${esc(s.fromName || '')}" autocomplete="name">
+      </label>
+      <label class="jp-field">
+        <span class="jp-field-label">Your Gmail address</span>
+        <input class="jp-input jp-input--sm" id="setSmtpUser" type="email" autocomplete="off"
+          value="${esc(s.smtpUser || '')}" placeholder="you@gmail.com">
+      </label>
+      <label class="jp-field">
+        <span class="jp-field-label">The 16-letter password Google gives apps</span>
+        <input class="jp-input jp-input--sm" id="setSmtpPass" type="password" autocomplete="off"
+          placeholder="${s.smtpConfigured ? 'already saved — type a new one to replace it' : 'abcd efgh ijkl mnop'}">
+        <span class="jp-field-help">This is not your normal Google password, it only works for sending and
+          reading mail, it stays on this computer, and you can cancel it at any time. We use it to send your
+          applications and to spot the replies.</span>
+      </label>
+      <details class="jp-help">
+        <summary class="jp-note">Where do I find that?</summary>
+        <ol class="jp-note">
+          <li>Open your Google Account and go to <b>Security</b></li>
+          <li>Switch on <b>2-Step Verification</b> if it isn't on already</li>
+          <li>Open <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">App
+            passwords</a> and make one called "JobPilot"</li>
+          <li>Google shows you 16 letters — copy them into the box above</li>
+        </ol>
+      </details>
+    </div>
+    ${setSaveRowHtml('sending',
+      `<button type="button" class="jp-btn jp-btn--quiet jp-btn--sm" id="setTestEmail">Send myself a test</button>`)}
+    <p class="jp-note jp-set-foot">We never send anything to a company without showing you first.</p>`;
+}
+
+// The whole thing — who writes, the box you paste the code into, and the button
+// that proves it works — is in the card. It is the one setting that decides
+// whether an application is worth sending, so it is never behind "Advanced".
+//
+// The order is honest about money: a Claude subscription they already pay for
+// comes first when we can see it, then the free option, then the two you pay
+// per use. The same three words the welcome questions use ("nothing to paste",
+// "a free key from Groq") are used again here on purpose.
+// Whether Claude is signed in on this computer, checked live by the server on
+// every read of /api/settings. Its own sentences are written for a developer
+// ("Claude Code CLI not found — …"), so the two states we expect get plain
+// words here and anything unexpected falls back to what the server said,
+// which will still be more use than a shrug.
+function setClaudeWords(cc) {
+  const detail = String(cc.detail || '');
+  if (cc.available) return `Signed in on this computer${cc.plan ? ` on the ${cc.plan} plan` : ''} — ready to go.`;
+  if (/not found/i.test(detail)) {
+    return "We can't see Claude on this computer. Install it from claude.com/code and sign in, and this option starts working.";
+  }
+  if (/not signed in/i.test(detail)) {
+    return 'Claude is on this computer but nobody is signed in yet. Sign in there and this option starts working.';
+  }
+  return detail || 'Having a look…';
+}
+
+function setWriterBody(s) {
+  const cc = s.claudeCode || {};
+  const plan = cc.plan ? ` on the ${cc.plan} plan` : '';
+  const p = s.provider;
+  const key = (id, who, label, placeholder, help) => `
+    <div class="jp-set-key${p === who ? '' : ' jp-hidden'}" data-key-for="${who}">
+      <label class="jp-field">
+        <span class="jp-field-label">${label}</span>
+        <input class="jp-input jp-input--sm" type="password" id="${id}" autocomplete="off"
+          placeholder="${esc(placeholder)}">
+        <span class="jp-field-help">${help}</span>
+      </label>
+    </div>`;
+
+  const claude = `
+    <button type="button" class="jp-choice${p === 'claude_code' ? ' is-on' : ''}" data-writer="claude_code">
+      <div class="jp-choice-title">Use your Claude subscription — nothing to paste</div>
+      <div class="jp-choice-sub">${cc.available
+        ? `You're already signed in to Claude on this computer${esc(plan)}, so there is nothing to set up and
+           nothing more to pay.`
+        : `If you pay for Claude Pro or Max, JobPilot can use that instead of a key — sign in to Claude on
+           this computer and this option starts working.`}</div>
+      <div class="jp-choice-sub jp-set-detect jp-set-detect--${cc.available ? 'ok' : 'no'}">${esc(setClaudeWords(cc))}</div>
+    </button>`;
+  const groq = `
+    <button type="button" class="jp-choice${p === 'groq' ? ' is-on' : ''}" data-writer="groq">
+      <div class="jp-choice-title">Get a free key from Groq</div>
+      <div class="jp-choice-sub">Free to use. Make an account, copy the long code it shows you, paste it
+        below — about two minutes.</div>
+    </button>
+    ${key('setGroqKey', 'groq', 'Paste the code here',
+      s.groqKeySet ? `already saved (${s.groqKeyMasked}) — paste a new one to replace it` : 'it starts with gsk_',
+      '<a href="https://console.groq.com/keys" target="_blank" rel="noopener">Open the page that gives you one ↗</a>')}`;
+
+  return `
+    <p class="jp-set-stakes">This is the part that makes an application worth sending. With a writer
+      connected, every CV is rewritten around the job in front of it and every message says why you fit
+      that particular company. Without one we still find you jobs and show them to you, but the CV and
+      message we hand over are rough stand-ins — not something you'd want a company to read.</p>
+    ${cc.available ? claude + groq : groq + claude}
+    <button type="button" class="jp-choice${p === 'openai' ? ' is-on' : ''}" data-writer="openai">
+      <div class="jp-choice-title">A key from OpenAI, the people behind ChatGPT</div>
+      <div class="jp-choice-sub">You pay them for what JobPilot uses — usually a couple of dollars a month
+        at this rate. Worth it if you already have an account there.</div>
+    </button>
+    ${key('setOpenaiKey', 'openai', 'Paste the code here',
+      s.openaiKeySet ? `already saved (${s.openaiKeyMasked}) — paste a new one to replace it` : 'it starts with sk-',
+      '<a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">Open the page that gives you one ↗</a>')}
+    <button type="button" class="jp-choice${p === 'anthropic' ? ' is-on' : ''}" data-writer="anthropic">
+      <div class="jp-choice-title">A key from Anthropic, the people behind Claude</div>
+      <div class="jp-choice-sub">Also paid by the use, and separate from a Claude subscription — if you have
+        the subscription, pick that one instead and pay nothing.</div>
+    </button>
+    ${key('setAnthropicKey', 'anthropic', 'Paste the code here',
+      s.anthropicKeySet ? `already saved (${s.anthropicKeyMasked}) — paste a new one to replace it` : 'it starts with sk-ant-',
+      '<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Open the page that gives you one ↗</a>')}
+    ${setSaveRowHtml('writer',
+      `<button type="button" class="jp-btn jp-btn--quiet jp-btn--sm" id="setTestAi">Check it works</button>`)}
+    <details class="jp-help jp-set-model">
+      <summary class="jp-note">Use a different one of their writers</summary>
+      <label class="jp-field">
+        <span class="jp-field-label">Which one to use</span>
+        <input class="jp-input jp-input--sm" id="setModel" value="${esc(s.model || '')}"
+          placeholder="${esc(s.activeModel || '')}">
+        <span class="jp-field-help" id="setModelHint">${esc(SET_MODEL_HINTS[p] || '')}</span>
+      </label>
+      <p class="jp-note">Saved with the Save button above.</p>
+    </details>
+    <p class="jp-note jp-set-foot">Whichever you pick, your CV and everything we write stays on this
+      computer. Only the job advert and the words we need go out.</p>`;
+}
+
+/* ---- Advanced ------------------------------------------------------------ */
+
+function setBoardsBody(s) {
+  const src = s.sources || {};
+  return `
+    <label class="jp-check">
+      <input type="checkbox" id="setSrcRemotive" ${src.remotive ? 'checked' : ''}>
+      <span>Free job boards — Remotive, RemoteOK and Arbeitnow
+        <span class="jp-field-help">Free, on to start with, nothing to set up.</span></span>
+    </label>
+    <div class="jp-card jp-card--warn jp-card--tight jp-adv-warn">
+      <div class="jp-h-sans--sm">Worth knowing before you turn the next two on</div>
+      <p class="jp-note">LinkedIn and Naukri do not allow other tools to read their listings, so switching
+        these on may go against those sites' own terms. That is why they start off — it is your call,
+        and the risk is yours. The free boards and company career pages carry no such question, and
+        career pages tend to get the best replies anyway.</p>
+    </div>
+    <label class="jp-check">
+      <input type="checkbox" id="setSrcLinkedin" ${src.linkedin ? 'checked' : ''}>
+      <span>LinkedIn
+        <span class="jp-field-help">Needs a free account with Apify — the service that reads LinkedIn for
+          us — and the code it gives you, below.</span></span>
+    </label>
+    <label class="jp-check">
+      <input type="checkbox" id="setSrcNaukri" ${src.naukri ? 'checked' : ''}>
+      <span>Naukri
+        <span class="jp-field-help">India's biggest job board. Uses the same Apify code as LinkedIn.</span></span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">Your Apify code</span>
+      <input class="jp-input jp-input--sm" type="password" id="setApifyToken" autocomplete="off"
+        placeholder="${s.apifyTokenSet ? `already saved (${esc(s.apifyTokenMasked)}) — paste a new one to replace it` : 'apify_api_…'}">
+    </label>
+    <details class="jp-help">
+      <summary class="jp-note">How to get the Apify code (two minutes)</summary>
+      <ol class="jp-note">
+        <li>Make a free account at <a href="https://apify.com" target="_blank" rel="noopener">apify.com</a></li>
+        <li>Open <a href="https://console.apify.com/settings/integrations" target="_blank" rel="noopener">Settings
+          → API &amp; Integrations</a> and copy your personal code</li>
+        <li>Paste it in the box above and save</li>
+        <li>Once only: open <a href="https://console.apify.com/actors/zn01OAlzP853oqn4Z?approvePermissions=true"
+          target="_blank" rel="noopener">the LinkedIn reader page</a> and press Approve</li>
+      </ol>
+      <p class="jp-note">Apify gives you $5 of free credit a month — enough for a few thousand LinkedIn jobs.</p>
+    </details>
+    <p class="jp-note jp-adv-para">Adzuna is another job board, free to use, with good coverage in a lot of
+      countries. It needs two codes from them — free at
+      <a href="https://developer.adzuna.com" target="_blank" rel="noopener">developer.adzuna.com</a>: register,
+      make an app, then copy the two it shows you.</p>
+    <label class="jp-field">
+      <span class="jp-field-label">Adzuna app ID</span>
+      <input class="jp-input jp-input--sm" id="setAdzunaAppId" autocomplete="off"
+        value="${esc(s.adzunaAppId || '')}" placeholder="from developer.adzuna.com">
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">Adzuna app key</span>
+      <input class="jp-input jp-input--sm" type="password" id="setAdzunaAppKey" autocomplete="off"
+        placeholder="${s.adzunaKeySet ? 'already saved — paste a new one to replace it' : 'the second code they give you'}">
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">Which country to ask Adzuna about</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="setAdzunaCountry" maxlength="2"
+        value="${esc(s.adzunaCountry || 'in')}" placeholder="in">
+      <span class="jp-field-help">Two letters — in, gb, us, de. This one only affects Adzuna; the places you
+        chose still decide what you actually see.</span>
+    </label>
+    ${setSaveRowHtml('boards')}`;
+}
+
+function setPromptsBody(s) {
+  return `
+    <p class="jp-note jp-adv-para">Anything you write here is added to what we tell the writer, every time.
+      Notes you save on the dashboard land in whichever of the three you picked there.</p>
+    <label class="jp-field">
+      <span class="jp-field-label">When we're choosing which jobs to go for</span>
+      <textarea class="jp-textarea jp-textarea--md" id="setPromptFind" rows="3"
+        placeholder="e.g.&#10;- Never apply to agencies or consultancies&#10;- Prefer product companies&#10;- Avoid anything asking for 10+ years">${esc(s.promptFind || '')}</textarea>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">When we're writing your CV</span>
+      <textarea class="jp-textarea jp-textarea--md" id="setPromptCV" rows="3"
+        placeholder="e.g.&#10;- Lead with my fintech dashboard work&#10;- Keep it to one page&#10;- Put numbers on everything">${esc(s.promptCV || '')}</textarea>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">When we're writing the message that goes with it</span>
+      <textarea class="jp-textarea jp-textarea--md" id="setPromptEmail" rows="3"
+        placeholder="e.g.&#10;- Under 120 words&#10;- Warm but not chatty&#10;- Always say why I want THIS company">${esc(s.promptEmail || '')}</textarea>
+    </label>
+    ${setSaveRowHtml('prompts')}`;
+}
+
+function setChecksBody(s) {
+  return `
+    <label class="jp-check">
+      <input type="checkbox" id="setFactCheck" ${s.factCheck ? 'checked' : ''}>
+      <span>Read every CV and message back against your real CV before it goes out
+        <span class="jp-field-help">Catches anything invented — a skill you never claimed, a job you never
+          had. Costs one extra piece of AI work per application.</span></span>
+    </label>
+    <div class="jp-inline">
+      <span>Don't approach the same company again within</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="setCooldown" type="number" min="0" max="90"
+        value="${Number(s.companyCooldownDays) || 0}">
+      <span>days</span>
+    </div>
+    <label class="jp-check">
+      <input type="checkbox" id="setAutoMode" ${s.mode === 'auto' ? 'checked' : ''}>
+      <span>Let JobPilot send the strong ones without asking me first
+        <span class="jp-field-help">Off to start with. With it off, everything waits on your board until you
+          press send.</span></span>
+    </label>
+    <div class="jp-inline">
+      <span>…and only when the job is at least</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="setAutoMinScore" type="number" min="0" max="95"
+        value="${Number(s.autoMinScore) || 0}">
+      <span>out of 100 a match</span>
+    </div>
+    <p class="jp-note jp-inline-note">Weaker matches still turn up on your board — they just wait for you.</p>
+    ${setSaveRowHtml('checks')}`;
+}
+
+function setReportsBody(s) {
+  return `
+    <label class="jp-check">
+      <input type="checkbox" id="setInsightsEnabled" ${s.insightsEnabled ? 'checked' : ''}>
+      <span>Look at how my search is going and email me what to change</span>
+    </label>
+    <div class="jp-inline">
+      <span>Every</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="setInsightsEvery" type="number" min="5" max="500"
+        value="${Number(s.insightsEvery) || 50}">
+      <span>applications</span>
+    </div>
+    <label class="jp-field">
+      <span class="jp-field-label">Send them to</span>
+      <input class="jp-input jp-input--sm" id="setInsightsEmail" type="email" value="${esc(s.insightsEmail || '')}"
+        placeholder="you@gmail.com">
+      <span class="jp-field-help">Also sent after JobPilot has had a look on its own. You can always read
+        them in the app instead.</span>
+    </label>
+    ${setSaveRowHtml('reports',
+      `<button type="button" class="jp-btn jp-btn--quiet jp-btn--sm" id="setOpenReports">Read them here</button>`)}`;
+}
+
+function setDevBody(s) {
+  return `
+    <label class="jp-check">
+      <input type="checkbox" id="setDevFeedback" ${s.devFeedbackEnabled ? 'checked' : ''}>
+      <span>Send the person who makes JobPilot a few numbers, about every six days</span>
+    </label>
+    <p class="jp-note jp-adv-para">Off unless you tick it. Counts only — how many jobs were found and sent,
+      which boards they came from, what went wrong and what it cost. Never your name, the companies, the job
+      titles or a word of anything written for you. It goes from your own Gmail, so they do see the address
+      it came from.</p>
+    ${setSaveRowHtml('dev')}`;
+}
+
+function setDataBody(s) {
+  return `
+    <p class="jp-note jp-adv-para">Everything JobPilot knows about you is in this one folder: your settings
+      at the top, and a folder for each separate search under <code>profiles/</code> with its jobs, its
+      history and the CV file you gave us.</p>
+    <div class="jp-set-path"><code>${esc(s.dataDir || '')}</code>
+      <button type="button" class="jp-btn jp-btn--quiet jp-btn--xs" id="setCopyDir">Copy</button></div>
+    <p class="jp-note jp-adv-para">Moving to a new computer: copy this folder to the same place there, run
+      the setup there, and everything opens exactly as you left it. Back it up like you would photos.</p>
+    <div class="jp-set-actions">
+      <button type="button" class="jp-btn jp-btn--secondary jp-btn--sm" id="setReset">Empty this search and start again</button>
+      <span class="jp-note">Throws away the CV, every job and every application in the search you're in now.
+        It can't be undone.</span>
+    </div>`;
+}
+
+function setReachBody() {
+  return `
+    <p class="jp-note jp-adv-para">JobPilot answers on this computer only — nothing about you is on the
+      internet, and nobody else on your network can open it. It's the reason your CV and your email password
+      are safe sitting here in plain view.</p>
+    <p class="jp-note jp-adv-para">If you really want to open it from your phone on the same wifi, start
+      JobPilot with <code>JOBPILOT_LAN=1</code> in front of the command. Anyone on that network could then
+      read your CV, change these settings and send email as you, so we don't do it for you.</p>`;
+}
+
+function setInstallBody() {
+  return `
+    <p class="jp-note jp-adv-para">Puts JobPilot in your Dock or Start menu with its own window and its own
+      icon. Same app, same data — just no browser tabs around it.</p>
+    <div class="jp-set-actions">
+      <button type="button" class="jp-btn jp-btn--secondary jp-btn--sm" id="setInstallApp">Install it</button>
+    </div>`;
+}
+
+function setAdvRows(s) {
+  const src = s.sources || {};
+  const on = [];
+  if (src.remotive) on.push('free boards');
+  if (src.ats) on.push('career pages');
+  if (src.linkedin) on.push('LinkedIn');
+  if (src.naukri) on.push('Naukri');
+  if (src.adzuna) on.push('Adzuna');
+  const written = [s.promptFind, s.promptCV, s.promptEmail].filter(x => (x || '').trim()).length;
+  const rows = [
+    { id: 'boards', title: 'Extra job boards',
+      sub: 'LinkedIn, Naukri and Adzuna. They need an account and a code from them.',
+      state: on.length ? on.join(', ') : 'none on', body: () => setBoardsBody(s) },
+    { id: 'prompts', title: 'Your own instructions to the writer',
+      sub: 'Rules like "no agency jobs" or "keep messages short".',
+      state: written ? `${written} of 3 written` : 'none yet', body: () => setPromptsBody(s) },
+    { id: 'checks', title: 'Quality checks',
+      sub: "Reading every CV back before it goes, and not pestering the same company twice.",
+      state: s.factCheck ? 'on' : 'off', body: () => setChecksBody(s) },
+    { id: 'reports', title: 'Progress reports by email',
+      sub: 'A short read on what is and is not working, sent to you.',
+      state: s.insightsEnabled ? `every ${s.insightsEvery} applications` : 'off', body: () => setReportsBody(s) },
+    { id: 'dev', title: 'Sharing usage numbers with the developer',
+      sub: 'Counts only — never your name, the companies, or anything written for you.',
+      state: s.devFeedbackEnabled ? 'on' : 'off', body: () => setDevBody(s) },
+    { id: 'data', title: 'Where your data lives',
+      sub: 'One folder on this computer — copy it to move to another one.',
+      state: 'on this computer', body: () => setDataBody(s) },
+    { id: 'reach', title: 'Who can reach JobPilot',
+      sub: 'Only this computer, and that is deliberate.',
+      state: 'this computer only', body: () => setReachBody() }
+  ];
+  if (window.jobPilotInstall && window.jobPilotInstall.canInstall()) {
+    rows.push({ id: 'install', title: 'Install JobPilot as an app',
+      sub: 'Its own window and its own icon, same data.',
+      state: 'you can', body: () => setInstallBody() });
+  }
+  return rows;
+}
+
+function setAdvRowHtml(r) {
+  const open = setUi.row === r.id;
+  return `
+    <div class="jp-adv-row">
+      <button type="button" class="jp-adv-head" data-set-row="${r.id}" aria-expanded="${open}">
+        <span class="jp-adv-main">
+          <span class="jp-adv-title">${r.title}</span>
+          <span class="jp-adv-sub">${r.sub}</span>
+        </span>
+        <span class="jp-adv-state">${esc(r.state)} ${open ? '▲' : '▼'}</span>
+      </button>
+      ${open ? `<div class="jp-adv-open">${r.body()}</div>` : ''}
+    </div>`;
+}
+
+function setAdvancedHtml(s) {
+  return `
+    <div class="jp-card jp-card--flush jp-adv">
+      <button type="button" class="jp-adv-toggle" data-set-adv aria-expanded="${setUi.adv}">
+        <span class="jp-h-sans--sm">Advanced</span>
+        <span class="jp-note jp-adv-hint">Job boards with keys, your own instructions to the writer, data folder</span>
+        <span class="jp-note jp-spacer">${setUi.adv ? '▲' : '▼'}</span>
+      </button>
+      ${setUi.adv ? `
+        <div class="jp-adv-body">
+          <p class="jp-note jp-adv-lede">You almost certainly don't need anything in here. It's for people
+            who want to plug in paid job boards or change how the writer writes.</p>
+          ${setAdvRows(s).map(setAdvRowHtml).join('')}
+        </div>` : ''}
+    </div>`;
+}
+
+function settingsSkeletonHtml() {
+  return `
+    <div class="jp-page jp-page--narrow">
+      <h1 class="jp-title">Settings</h1>
+      <p class="jp-lede jp-set-lede">Four things, and you can ignore all of them. Everything stays on this
+        computer.</p>
+      ${[0, 1, 2, 3].map(() => `
+        <div class="jp-card jp-set-card">
+          <div class="jp-set-head">
+            <div class="jp-skel jp-skel--avatar"></div>
+            <div class="jp-set-main">
+              <div class="jp-skel jp-skel--title"></div>
+              <div class="jp-skel jp-skel--text"></div>
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function renderSettingsScreen() {
+  const mount = JobPilot.mount('settings');
+  if (!mount) return;
+  const d = JobPilot.data;
+  if (!d || !d.settings) { mount.innerHTML = settingsSkeletonHtml(); return; }
+  const s = d.settings;
+  // Nobody writing yet? Then the one card that matters opens itself, rather
+  // than hiding the paste box behind a button on a page of four calm cards.
+  // The moment they open or close a card themselves, we stop doing that.
+  if (!s.llmReady && !setUi.touched && !setUi.card) setUi.card = 'writer';
+  mount.innerHTML = `
+    <div class="jp-page jp-page--narrow">
+      <h1 class="jp-title">Settings</h1>
+      <p class="jp-lede jp-set-lede">Four things, and you can ignore all of them. Everything stays on this
+        computer.</p>
+      ${setCardHtml({ id: 'cv', icon: '📄', tone: 'accent', title: 'Your CV and details',
+        sub: 'What we tell companies about you. Read from the file you gave us.',
+        state: setWordsCv(setProfile), cta: 'Open', go: 'you' })}
+      ${setCardHtml({ id: 'looking', icon: '🎯', tone: 'accent', title: "What you're looking for",
+        sub: 'Job titles, places, and how many applications feel right at a time.',
+        state: setWordsLooking(s), cta: 'Change' }, () => setLookingBody(s))}
+      ${setCardHtml({ id: 'sending', icon: '✉️', tone: 'good', title: 'Sending applications',
+        sub: 'We send from your own email address so replies come straight to you.',
+        state: setWordsSending(s), cta: 'Change' }, () => setSendingBody(s))}
+      ${setCardHtml({ id: 'writer', icon: '✍️', tone: s.llmReady ? 'accent' : 'warn', title: 'The writer',
+        sub: 'The AI that reads job adverts and writes your CVs and messages. It is what decides whether an application is worth sending.',
+        state: setWordsWriter(s, d.stats), cta: s.llmReady ? 'Change' : 'Set this up',
+        attn: s.llmReady ? '' : 'Two minutes, and worth it' }, () => setWriterBody(s))}
+      ${setAdvancedHtml(s)}
+    </div>`;
+}
+
+/* ---- Saving -------------------------------------------------------------- */
+
+// One shape per section. Same field names the old window posted, so the server
+// and everything reading these settings is untouched.
+function setBodyFor(kind, s) {
+  if (kind === 'looking') return {
+    jobTitles: setVal('setTitles'),
+    jobLocations: setVal('setPlaces'),
+    remoteOk: setOn('setRemote'),
+    atsCompanies: setVal('setCompanies'),
+    dailyTarget: setVal('setTarget'),
+    maxJobAgeDays: setVal('setMaxAge'),
+    preferLowCompetition: setOn('setLowComp'),
+    autoSearch: setOn('setAutoSearch'),
+    autoSearchHours: setVal('setAutoHours')
+  };
+  if (kind === 'sending') {
+    const mode = document.querySelector('[data-send].is-on')?.dataset.send || 'myself';
+    return {
+      sendingMode: mode,
+      fromName: setVal('setFromName'),
+      smtpUser: setVal('setSmtpUser'),
+      smtpPass: setVal('setSmtpPass')
+    };
+  }
+  if (kind === 'writer') return {
+    provider: document.querySelector('[data-writer].is-on')?.dataset.writer || s.provider,
+    model: setVal('setModel'),
+    groqKey: setVal('setGroqKey'),
+    openaiKey: setVal('setOpenaiKey'),
+    anthropicKey: setVal('setAnthropicKey')
+  };
+  if (kind === 'boards') return {
+    sources: { remotive: setOn('setSrcRemotive'), linkedin: setOn('setSrcLinkedin'), naukri: setOn('setSrcNaukri') },
+    apifyToken: setVal('setApifyToken'),
+    adzunaAppId: setVal('setAdzunaAppId'),
+    adzunaAppKey: setVal('setAdzunaAppKey'),
+    adzunaCountry: setVal('setAdzunaCountry')
+  };
+  if (kind === 'prompts') return {
+    promptFind: setVal('setPromptFind'), promptCV: setVal('setPromptCV'), promptEmail: setVal('setPromptEmail')
+  };
+  if (kind === 'checks') return {
+    factCheck: setOn('setFactCheck'),
+    companyCooldownDays: setVal('setCooldown'),
+    mode: setOn('setAutoMode') ? 'auto' : 'manual',
+    autoMinScore: setVal('setAutoMinScore')
+  };
+  if (kind === 'reports') return {
+    insightsEnabled: setOn('setInsightsEnabled'),
+    insightsEvery: setVal('setInsightsEvery'),
+    insightsEmail: setVal('setInsightsEmail')
+  };
+  if (kind === 'dev') return { devFeedbackEnabled: setOn('setDevFeedback') };
+  return {};
+}
+
+function setSavedWords(kind, body) {
+  if (kind === 'looking') return "Saved — that's what we'll look for from now on.";
+  if (kind === 'sending') return body.sendingMode === 'jobpilot'
+    ? "Saved — we'll send your applications from that address."
+    : "Saved — we'll write them all and leave the sending to you.";
+  if (kind === 'writer') return 'Saved — that\'s who writes for you now. "Check it works" proves it.';
+  if (kind === 'boards') return "Saved — that's where we'll look.";
+  if (kind === 'prompts') return "Saved — we'll follow those every time from now on.";
+  if (kind === 'checks') return 'Saved.';
+  if (kind === 'reports') return body.insightsEnabled ? "Saved — we'll email you one every so often." : 'Saved — no more reports by email.';
+  if (kind === 'dev') return body.devFeedbackEnabled ? 'Saved — thank you.' : 'Saved — nothing is shared.';
+  return 'Saved.';
+}
+
+async function setSave(kind, btn) {
+  const s = JobPilot.data?.settings || {};
+  const body = setBodyFor(kind, s);
+  // The one rule the old window enforced too: those two boards can't work
+  // without the Apify code, and silently saving an "on" that does nothing is
+  // worse than saying so.
+  if (kind === 'boards' && (body.sources.linkedin || body.sources.naukri) && !s.apifyTokenSet && !body.apifyToken) {
+    setMsg(kind, `${body.sources.linkedin ? 'LinkedIn' : 'Naukri'} can't work without the Apify code — there are steps for it just below.`, true);
+    return;
+  }
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="jp-spinner"></span> Saving…';
+  setMsg(kind, '');
+  try {
+    await api('/api/settings', { method: 'POST', body });
+    setUi.card = null;
+    setUi.row = null;
+    await refresh();          // re-renders the screen with the new state lines
+    toast(setSavedWords(kind, body));
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = label;
+    setMsg(kind, err.message, true);
+  }
+}
+
+/* ---- Clicks -------------------------------------------------------------- */
+
+document.getElementById('mount-settings')?.addEventListener('click', async e => {
+  const card = e.target.closest('[data-set-card]');
+  if (card) {
+    setUi.touched = true;   // they are driving now — stop opening "the writer" for them
+    setUi.card = setUi.card === card.dataset.setCard ? null : card.dataset.setCard;
+    renderSettingsScreen();
+    return;
+  }
+  if (e.target.closest('[data-set-adv]')) {
+    setUi.adv = !setUi.adv;
+    if (!setUi.adv) setUi.row = null;
+    renderSettingsScreen();
+    return;
+  }
+  const row = e.target.closest('[data-set-row]');
+  if (row) {
+    setUi.row = setUi.row === row.dataset.setRow ? null : row.dataset.setRow;
+    renderSettingsScreen();
+    return;
+  }
+  const save = e.target.closest('[data-set-save]');
+  if (save) return setSave(save.dataset.setSave, save);
+
+  // Picking a card-shaped choice: no re-render, so nothing typed is lost.
+  const send = e.target.closest('[data-send]');
+  if (send) {
+    for (const c of document.querySelectorAll('[data-send]')) c.classList.toggle('is-on', c === send);
+    $('#setMailBox')?.classList.toggle('jp-hidden', send.dataset.send !== 'jobpilot');
+    return;
+  }
+  const writer = e.target.closest('[data-writer]');
+  if (writer) {
+    const who = writer.dataset.writer;
+    for (const c of document.querySelectorAll('[data-writer]')) c.classList.toggle('is-on', c === writer);
+    for (const box of document.querySelectorAll('[data-key-for]')) {
+      box.classList.toggle('jp-hidden', box.dataset.keyFor !== who);
+    }
+    const hint = $('#setModelHint');
+    if (hint) hint.textContent = SET_MODEL_HINTS[who] || '';
+    return;
+  }
+
+  if (e.target.closest('#setTestEmail')) return setTestEmail(e.target.closest('#setTestEmail'));
+  if (e.target.closest('#setTestAi')) return setTestAi(e.target.closest('#setTestAi'));
+  if (e.target.closest('#setOpenReports')) {
+    openReports().catch(err => toast(err.message, true));
+    return;
+  }
+  if (e.target.closest('#setCopyDir')) {
+    const path = JobPilot.data?.settings?.dataDir || '';
+    try {
+      await navigator.clipboard.writeText(path);
+      toast('Copied — paste it into Finder or Explorer to open the folder.');
+    } catch { toast('Select the line and copy it by hand — this browser wouldn\'t let us.', true); }
+    return;
+  }
+  if (e.target.closest('#setReset')) {
+    if (!confirm('Throw away the CV, every job and every application in this search? It cannot be undone.')) return;
+    try {
+      await api('/api/demo/reset', { method: 'POST' });
+      location.reload();
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (e.target.closest('#setInstallApp')) {
+    window.jobPilotInstall?.install();
+  }
+});
+
+async function setTestEmail(btn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="jp-spinner"></span> Sending…';
+  setMsg('sending', '');
+  try {
+    // Save first, so the test uses what is on screen rather than what was
+    // saved last time — otherwise "send a test" tests the wrong address.
+    await api('/api/settings', { method: 'POST', body: setBodyFor('sending', JobPilot.data?.settings || {}) });
+    const res = await api('/api/settings/test-email', { method: 'POST' });
+    setMsg('sending', `Sent one to ${res.to} — have a look in your inbox, and the spam folder.`);
+    refresh().catch(() => {});
+  } catch (err) { setMsg('sending', err.message, true); }
+  btn.disabled = false;
+  btn.textContent = label;
+}
+
+async function setTestAi(btn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="jp-spinner"></span> Checking…';
+  setMsg('writer', '');
+  try {
+    await api('/api/settings', { method: 'POST', body: setBodyFor('writer', JobPilot.data?.settings || {}) });
+    const res = await api('/api/settings/test-ai', { method: 'POST' });
+    setMsg('writer', res.message || 'That works.');
+    refresh().catch(() => {});
+  } catch (err) { setMsg('writer', err.message, true); }
+  btn.disabled = false;
+  btn.textContent = label;
+}
+
+JobPilot.screens.register('settings', {
+  onEnter() {
+    renderSettingsScreen();
+    setLoadProfile().then(() => {
+      if (JobPilot.screens.current() === 'settings' && !setUi.card && !setUi.row) renderSettingsScreen();
+    });
+  }
+});
+
+/* ===========================================================================
+ * YOU — the name, the CV, and the details we put in front of companies.
+ *
+ * Everything the old profile window held, plus the profile switcher that used
+ * to be a <select> in the sidebar. Same /api/profile and /api/profiles calls.
+ * ======================================================================== */
+
+function youFieldsHtml(p) {
+  const list = (v, sep = ', ') => (Array.isArray(v) ? v : []).join(sep);
+  return `
+    <label class="jp-field">
+      <span class="jp-field-label">Your name</span>
+      <input class="jp-input jp-input--sm" id="youName" value="${esc(p.name || '')}" autocomplete="name">
+      <span class="jp-field-help">The name companies see on everything we send.</span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">Your email address</span>
+      <input class="jp-input jp-input--sm" id="youEmail" type="email" value="${esc(p.email || '')}" autocomplete="off">
+      <span class="jp-field-help">The one on your CV, so people can write back to you.</span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">What you do</span>
+      <input class="jp-input jp-input--sm" id="youTitle" value="${esc(p.title || '')}">
+      <span class="jp-field-help">The one-line answer to "what's your job?"</span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">How long you have been doing it</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="youYears" type="number" min="0" max="60"
+        value="${p.years_experience ?? ''}">
+      <span class="jp-field-help">In years. Roughly is fine.</span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">Things you are good at</span>
+      <textarea class="jp-textarea jp-textarea--md" id="youSkills" rows="2"
+        placeholder="React, TypeScript, Node.js">${esc(list(p.skills))}</textarea>
+      <span class="jp-field-help">Separated by commas. We match these against what each job asks for.</span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">The kinds of job this suits</span>
+      <textarea class="jp-textarea jp-textarea--md" id="youRoles" rows="2"
+        placeholder="Senior Software Engineer, Full Stack Developer">${esc(list(p.target_roles))}</textarea>
+      <span class="jp-field-help">Separated by commas. We search for these when you haven't said otherwise
+        in Settings.</span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">A sentence about you</span>
+      <textarea class="jp-textarea jp-textarea--md" id="youSummary" rows="3">${esc(p.summary || '')}</textarea>
+      <span class="jp-field-help">This often becomes the first line of your message.</span>
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">Things you are proud of</span>
+      <textarea class="jp-textarea jp-textarea--md" id="youAchievements" rows="4"
+        placeholder="Cut how long the payments page took to load by 42%&#10;Led a team of three">${esc(list(p.top_achievements, '\n'))}</textarea>
+      <span class="jp-field-help">One per line. These are what we lead with when a job matches them.</span>
+    </label>`;
+}
+
+function youProfilesHtml(profiles) {
+  const rows = (profiles || []).map(p => `
+    <div class="jp-row">
+      <span class="jp-avatar jp-avatar--sm${p.active ? ' jp-avatar--accent' : ''}">${esc(initialsOf(p.name))}</span>
+      <div class="jp-row-main">
+        <div class="jp-row-title jp-row-title--light">${esc(p.name)}</div>
+        <div class="jp-row-sub jp-row-sub--sm">${esc(p.title)} · ${setCount(p.applications, 'job', 'jobs')}</div>
+      </div>
+      <div class="jp-row-end">
+        ${p.active
+          ? `<span class="jp-badge jp-badge--accent">the one you're in</span>
+             <button type="button" class="jp-btn jp-btn--quiet jp-btn--xs" data-you-rename="${esc(p.id)}">Rename</button>`
+          : `<button type="button" class="jp-btn jp-btn--secondary jp-btn--xs" data-you-switch="${esc(p.id)}">Switch to this</button>`}
+        ${(profiles.length > 1 && p.active)
+          ? `<button type="button" class="jp-btn jp-btn--quiet jp-btn--xs" data-you-delete="${esc(p.id)}">Delete</button>` : ''}
+      </div>
+    </div>`).join('');
+  return `
+    <div class="jp-card">
+      <div class="jp-h-sans--sm">More than one search</div>
+      <p class="jp-set-sub">You can keep separate searches — one for backend jobs and one for design work,
+        say, or one for here and one for abroad. Each has its own CV, its own jobs and its own history.</p>
+      <div class="jp-list jp-list--ruled">${rows}</div>
+      <div class="jp-set-actions">
+        <button type="button" class="jp-btn jp-btn--secondary jp-btn--sm" id="youNewProfile">Start another search</button>
+        <span class="jp-note">You give the new one its own CV after switching to it.</span>
+      </div>
+    </div>`;
+}
+
+function renderYouScreen() {
+  const mount = JobPilot.mount('you');
+  if (!mount) return;
+  const p = setProfile || {};
+  const has = !!p.name;
+  const profiles = JobPilot.data?.profiles || [];
+  mount.innerHTML = `
+    <div class="jp-page jp-page--narrow">
+      <h1 class="jp-title">You</h1>
+      <p class="jp-lede jp-set-lede">This is what we tell companies about you. Change anything that reads wrong.</p>
+      <input type="file" id="youCvInput" accept=".pdf,.docx,.txt,.md" hidden>
+      ${has ? `
+        <div class="jp-card jp-card--lg">
+          <div class="jp-row-flex jp-you-head">
+            <span class="jp-avatar jp-avatar--lg jp-avatar--round jp-avatar--accent">${esc(initialsOf(p.name))}</span>
+            <div>
+              <div class="jp-h-sans">${esc(p.name)}</div>
+              <div class="jp-row-sub">${esc([p.title, p.years_experience ? `${p.years_experience} years` : '']
+                .filter(Boolean).join(' · '))}</div>
+            </div>
+            <label class="jp-btn jp-btn--secondary jp-btn--sm jp-spacer" for="youCvInput">Replace my CV</label>
+          </div>
+          ${youFieldsHtml(p)}
+          <div class="jp-set-actions jp-you-save">
+            <button type="button" class="jp-btn jp-btn--primary jp-btn--sm" id="youSave">Save</button>
+            <span class="jp-note" data-set-msg="you" aria-live="polite">Kept on this computer — nothing is uploaded anywhere.</span>
+          </div>
+        </div>`
+      : `
+        <div class="jp-card jp-card--lg">
+          <h2 class="jp-h2">We haven't read a CV yet</h2>
+          <p class="jp-lede jp-you-empty-lede">Give us one file, once. We read it to learn what you do, then
+            rewrite it to fit each job. It stays on this computer.</p>
+          <div class="jp-card jp-card--dashed">
+            <p class="jp-lede">PDF, Word or plain text</p>
+            <div class="jp-btns jp-ob-drop-btns">
+              <label class="jp-btn jp-btn--primary" for="youCvInput">Choose a file</label>
+            </div>
+          </div>
+        </div>`}
+      ${youProfilesHtml(profiles)}
+    </div>`;
+}
+
+async function youSave(btn) {
+  const splitLines = v => v.split('\n').map(x => x.trim()).filter(Boolean);
+  const profile = {
+    ...(setProfile || {}),   // keep everything the writer extracted that this form doesn't show
+    name: setVal('youName'),
+    email: setVal('youEmail'),
+    title: setVal('youTitle'),
+    years_experience: Number(setVal('youYears')) || 0,
+    skills: splitList(setVal('youSkills'), ','),
+    target_roles: splitList(setVal('youRoles'), ','),
+    summary: setVal('youSummary'),
+    top_achievements: splitLines($('#youAchievements')?.value || '')
+  };
+  if (!profile.name) { setMsg('you', 'We need a name to put on your applications.', true); return; }
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="jp-spinner"></span> Saving…';
+  try {
+    await api('/api/profile', { method: 'PUT', body: { profile } });
+    setProfile = profile;
+    setProfileLoaded = true;
+    toast('Saved — that\'s what we\'ll tell companies from now on.');
+    await refresh().catch(() => {});
+    renderYouScreen();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = label;
+    setMsg('you', err.message, true);
+  }
+}
+
+// The You screen's own CV upload: the shared one announces itself in words
+// ("Profile extracted — 7 skills found") that belong to the old dashboard.
+async function youUploadCv(file) {
+  toast('Reading your CV…');
+  const fd = new FormData();
+  fd.append('cv', file);
+  const res = await fetch('/api/cv', { method: 'POST', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `That file wouldn't open (${res.status})`);
+  setProfile = data.profile;
+  setProfileLoaded = true;
+  toast("Read it — have a look below and fix anything that isn't right.");
+  await refresh().catch(() => {});
+  renderYouScreen();
+}
+
+document.getElementById('mount-you')?.addEventListener('change', async e => {
+  if (e.target.id !== 'youCvInput') return;
+  const file = e.target.files[0];
+  if (!file) return;
+  try { await youUploadCv(file); } catch (err) { toast(err.message, true); }
+  e.target.value = '';
+});
+
+document.getElementById('mount-you')?.addEventListener('click', async e => {
+  if (e.target.closest('#youSave')) return youSave(e.target.closest('#youSave'));
+
+  const rename = e.target.closest('[data-you-rename]');
+  const switchTo = e.target.closest('[data-you-switch]');
+  const del = e.target.closest('[data-you-delete]');
+  const add = e.target.closest('#youNewProfile');
+  if (!rename && !switchTo && !del && !add) return;
+  try {
+    if (rename) {
+      const current = (JobPilot.data?.profiles || []).find(p => p.id === rename.dataset.youRename);
+      const label = prompt('What should this search be called? (e.g. "Backend jobs in India")', current?.name || '');
+      if (label === null) return;
+      await api(`/api/profiles/${rename.dataset.youRename}`, { method: 'PATCH', body: { label } });
+      toast('Renamed.');
+      await refresh();
+      renderYouScreen();
+      return;
+    }
+    if (add) {
+      if (!confirm('Start a separate search? You give it its own CV once you have switched to it.')) return;
+      await api('/api/profiles', { method: 'POST' });
+      toast('Made a new one — switch to it and give it a CV.');
+      await refresh();
+      renderYouScreen();
+      return;
+    }
+    if (del) {
+      const p = (JobPilot.data?.profiles || []).find(x => x.id === del.dataset.youDelete);
+      if (!confirm(`Delete "${p?.name}" and every job and application in it? This cannot be undone.`)) return;
+      await api(`/api/profiles/${del.dataset.youDelete}`, { method: 'DELETE' });
+      location.reload();
+      return;
+    }
+    await api(`/api/profiles/${switchTo.dataset.youSwitch}/activate`, { method: 'POST' });
+    location.reload();   // every screen is showing the old search's data
+  } catch (err) { toast(err.message, true); }
+});
+
+JobPilot.screens.register('you', {
+  onEnter() {
+    renderYouScreen();
+    setLoadProfile(true).then(() => {
+      if (JobPilot.screens.current() === 'you') renderYouScreen();
+    });
+  }
+});
+
+// One snapshot, both screens. Never redraw over somebody who is halfway
+// through typing — an open card or advanced row means leave it alone.
+document.addEventListener('jobpilot:data', () => {
+  if (JobPilot.screens.current() === 'settings' && !setUi.card && !setUi.row) renderSettingsScreen();
+});
+
+// One upload path for the old dashboard's entry points (sidebar, profile editor)
+// so the extracted profile is reported back the same way each time. The welcome
+// questions have their own (obUploadCv) because they say it in plainer words.
+async function uploadCvFile(file) {
+  toast('Uploading CV & extracting profile…');
+  const fd = new FormData();
+  fd.append('cv', file);
+  const res = await fetch('/api/cv', { method: 'POST', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+  toast(`Profile extracted — ${data.profile.skills.length} skills found`);
+  await refresh();
+  return data.profile;
+}
+
+$('#cvInput')?.addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    await uploadCvFile(file);
+  } catch (err) { toast(err.message, true); }
+  e.target.value = '';
+});
+
+$('#searchBtn')?.addEventListener('click', doSearch);
+$('#searchInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+async function doSearch() {
+  const btn = $('#searchBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="jp-spinner"></span>Looking…';
+  try {
+    const q = $('#searchInput').value.trim();
+    const res = await api('/api/jobs/search', { method: 'POST', body: { query: q } });
+    if (!res.added && res.note) {
+      toast(res.note, true); // nothing found — show the actual cause, not a shrug
+    } else if (res.added) {
+      toast(`Found ${res.added} job${res.added === 1 ? '' : 's'} for "${res.query}" that suit you`
+        + `${res.skipped ? ` — we left out ${res.skipped} that didn't` : ''}. They're under My jobs.`);
+    } else {
+      toast(`Nothing new for "${res.query}" just now. Try different words, or widen where you'd work in Settings.`);
+    }
+    refresh();
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false;
+  btn.textContent = 'Search';
+}
+
+$('#resetBtn')?.addEventListener('click', async () => {
+  if (!confirm('Start this search from scratch?\n\n'
+    + 'Your CV, every job we found, every application and its history go for good. There is no undo.')) return;
+  await api('/api/demo/reset', { method: 'POST' });
+  location.reload();
+});
+
+/* ===========================================================================
  * THE WELCOME QUESTIONS — five questions, one per screen.
  *
  * Replaces the old six-step setup wizard. Two deliberate differences:

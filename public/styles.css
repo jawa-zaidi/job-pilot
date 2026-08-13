@@ -944,3 +944,93 @@ a.jp-btn:hover { color: var(--ink); }
 a.jp-btn--primary:hover { color: var(--surface); }
 a.jp-btn--good:hover { color: var(--good); }
 
+/* ===========================================================================
+ * 9 · SETTINGS and YOU (owned by the settings screen)
+ *
+ * Everything on both screens composes the foundation's classes. These are the
+ * few shapes the comp has that the library had no equivalent for: the settings
+ * card with its state line, the "Advanced" drawer, a checkbox that reads as a
+ * sentence, and a number sitting inside a sentence.
+ * ======================================================================== */
+
+.jp-set-lede { margin: 6px 0 28px; }
+
+/* One settings card: icon tile, the words, and the button on the right. */
+.jp-set-head { display: flex; align-items: flex-start; gap: 18px; }
+.jp-set-head > .jp-btn { flex-shrink: 0; }
+.jp-set-main { flex: 1; min-width: 0; }
+.jp-set-eyebrow { display: block; margin-bottom: 5px; }
+.jp-set-sub { font-size: 15px; color: var(--ink2); margin-top: 4px; line-height: 1.5; }
+/* What it is set to right now, in plain words. Green when it is doing its job,
+   amber when it is waiting on the person. */
+.jp-set-state { font-size: 15px; font-weight: 500; color: var(--ink2); margin-top: 10px; }
+.jp-set-state--good { color: var(--good); }
+.jp-set-state--warn { color: var(--warn); }
+/* The editor a card opens into. */
+.jp-set-body { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); animation: rise .2s ease; }
+.jp-set-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
+.jp-set-msg--err { color: var(--bad); }
+.jp-set-foot { margin-top: 16px; }
+.jp-set-key { margin: -4px 0 12px; }
+.jp-set-model { margin-top: 18px; }
+/* The one paragraph that says what a writer is for. Reads as body text, not a
+   footnote — it is the reason the card exists. */
+.jp-set-stakes { font-size: 15px; line-height: 1.55; color: var(--ink2); margin-bottom: 20px; }
+/* The live "is Claude signed in on this computer" line under that choice. */
+.jp-set-detect { margin-top: 8px; font-size: 14px; }
+.jp-set-detect--ok { color: var(--good); }
+.jp-set-detect--no { color: var(--warn); }
+.jp-set-path {
+  display: flex; align-items: center; gap: 12px; margin: 12px 0;
+  background: var(--surface2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 14px;
+}
+.jp-set-path > code { font-family: var(--font-mono); font-size: 13px; word-break: break-all; }
+
+/* A checkbox with a sentence beside it, and its own help line underneath. */
+.jp-check { display: flex; align-items: flex-start; gap: 11px; font-size: 15px; margin-bottom: 16px; cursor: pointer; }
+.jp-check input { width: 16px; height: 16px; margin-top: 3px; flex-shrink: 0; accent-color: var(--accent); }
+.jp-check .jp-field-help { margin-top: 3px; }
+
+/* A number sitting inside a sentence: "only jobs put up in the last [30] days". */
+.jp-inline { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 15px; margin-bottom: 14px; }
+.jp-inline-num { width: 84px; flex-shrink: 0; }
+.jp-inline-note { margin: -8px 0 16px; }
+
+/* "Where do I find that?" — a fold-out with steps in it. */
+.jp-help { margin: 4px 0 16px; }
+.jp-help summary { cursor: pointer; }
+.jp-help ol { margin: 8px 0 0; padding-left: 20px; }
+.jp-help li { margin-bottom: 4px; }
+
+/* Advanced: shut by default, and quiet enough not to invite a click. */
+.jp-adv { margin-top: 22px; }
+.jp-adv-toggle {
+  width: 100%; text-align: left; border: none; background: none; cursor: pointer;
+  color: var(--ink); display: flex; align-items: center; gap: 12px; padding: 20px 24px;
+}
+.jp-adv-toggle:hover { background: var(--surface2); }
+.jp-adv-hint { flex: 1; min-width: 0; }
+.jp-adv-body { padding: 0 24px 22px; }
+.jp-adv-lede { margin-bottom: 16px; }
+.jp-adv-row { border-top: 1px solid var(--line); }
+.jp-adv-head {
+  width: 100%; text-align: left; border: none; background: none; cursor: pointer;
+  color: var(--ink); display: flex; align-items: center; gap: 14px; padding: 13px 0;
+}
+.jp-adv-main { display: block; min-width: 0; }
+.jp-adv-title { display: block; font-size: 16px; font-weight: 500; }
+.jp-adv-sub { display: block; font-size: 14px; color: var(--ink2); line-height: 1.45; }
+.jp-adv-state { margin-left: auto; flex-shrink: 0; font-size: 14px; color: var(--ink2); }
+.jp-adv-open { padding: 6px 0 18px; animation: rise .2s ease; }
+.jp-adv-para { margin-bottom: 14px; }
+/* The "these two sites don't allow it" note, sitting with the switches it is
+   about. Calm, not a klaxon — same warn tint as the offline bar. */
+.jp-adv-warn { margin: 4px 0 18px; }
+.jp-adv-warn .jp-note { margin-top: 5px; }
+
+/* You: the person's own name and face at the top of their card. */
+.jp-you-head { margin-bottom: 22px; }
+.jp-you-empty-lede { margin: 8px 0 18px; }
+.jp-you-save { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 4px; }
+
