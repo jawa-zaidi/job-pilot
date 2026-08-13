@@ -29,6 +29,17 @@ jp_pause() {
 
 JP_NODE="$(jp_find_node)" || JP_NODE=""
 
+if [ -z "$JP_NODE" ] && [ -f "$ROOT/runtime/bin/node" ]; then
+  # The download brought its own Node, so "install Node.js" is the wrong advice
+  # — this is the other Mac's file. Tell them that instead.
+  echo ""
+  echo "  ✈️  JobPilot"
+  echo "  ──────────"
+  jp_wrong_runtime_text
+  jp_pause
+  exit 1
+fi
+
 if [ -z "$JP_NODE" ]; then
   echo ""
   echo "  ✈️  JobPilot"

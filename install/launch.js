@@ -24,6 +24,16 @@ const ROOT = path.resolve(__dirname, '..');
 const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
 
+// A copy downloaded from the website has a Node runtime in runtime/ and its
+// dependencies already in place, so there is nothing to fetch and no npm to
+// fetch it with. A `git clone` has neither, and takes the original path.
+const BUNDLED = fs.existsSync(path.join(ROOT, 'runtime'))
+  && fs.existsSync(path.join(ROOT, 'node_modules'));
+
+// Anything we start should find the same Node we are running on, not whatever
+// else happens to be installed.
+process.env.PATH = `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH || ''}`;
+
 // The .app bundle runs us with no visible console, so it wants desktop
 // notifications instead of console lines.
 const NOTIFY = process.env.JOBPILOT_NOTIFY === '1' && IS_MAC;
@@ -220,6 +230,10 @@ function tryGitUpdate() {
 }
 
 function needsInstall() {
+  // Everything arrived in the download, already installed. Nothing to check,
+  // nothing to fetch, and the first run is instant even with no internet.
+  if (BUNDLED) return false;
+
   const modules = path.join(ROOT, 'node_modules');
   if (!fs.existsSync(modules)) return true;
 
@@ -244,6 +258,20 @@ function installDependencies() {
   if (!needsInstall()) return false;
 
   const firstTime = !fs.existsSync(path.join(ROOT, 'node_modules'));
+
+  // A downloaded copy is meant to arrive complete. If its node_modules folder
+  // has gone missing, npm is not the answer — the download does not include
+  // npm, because it never needed it.
+  if (firstTime && fs.existsSync(path.join(ROOT, 'runtime'))) {
+    say('');
+    say('  ❌ Some of JobPilot is missing (the "node_modules" folder).');
+    say('     Downloading JobPilot again and using the fresh folder is the');
+    say('     quickest fix — it comes with everything already in place.');
+    say('');
+    notify('Some files are missing — please download JobPilot again.');
+    process.exit(1);
+  }
+
   say(firstTime
     ? '  📦 Getting JobPilot ready (first time only, about a minute)…'
     : '  📦 Updating a few things…');
@@ -254,6 +282,17 @@ function installDependencies() {
     ['install', '--no-audit', '--no-fund', '--loglevel=error'],
     { cwd: ROOT, stdio: 'inherit', shell: IS_WIN },
   );
+
+  if (result.error && result.error.code === 'ENOENT') {
+    say('');
+    say('  ❌ JobPilot needs npm to fetch the parts it is missing, and there is');
+    say('     no npm on this computer. Installing Node.js from nodejs.org brings');
+    say('     npm with it, or download JobPilot again from the website and use');
+    say('     the fresh folder — that copy needs nothing at all.');
+    say('');
+    notify('npm is missing — download JobPilot again, or install Node.js.');
+    process.exit(1);
+  }
 
   if (result.status !== 0) {
     say('');
