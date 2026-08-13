@@ -52,6 +52,15 @@ function recordLLM(model, inTok, outTok) {
   return usd;
 }
 
+// Subscription AI (the Claude Code CLI route) bills nothing per token — the
+// user already paid for the plan. Log the usage so the ledger still shows what
+// ran, but never price it and never add to the running total: a fabricated
+// dollar figure here would be worse than no figure at all.
+function recordIncluded(model, inTok, outTok) {
+  charges.push({ at: Date.now(), kind: 'ai', label: model, usd: 0, inTok, outTok, included: true });
+  return 0;
+}
+
 function recordSource(source, count) {
   const per = sourcePrice(source);
   const usd = per * count;
@@ -71,8 +80,12 @@ function endRun(since) {
   for (const c of items) byLabel[c.label] = (byLabel[c.label] || 0) + c.usd;
   const ai = items.filter(c => c.kind === 'ai').reduce((s, c) => s + c.usd, 0);
   const source = items.filter(c => c.kind === 'source').reduce((s, c) => s + c.usd, 0);
+  // True when every AI call in the run was covered by a subscription, so a
+  // caller can say "included" instead of implying the run was genuinely free.
+  const aiItems = items.filter(c => c.kind === 'ai');
+  const aiIncluded = aiItems.length > 0 && aiItems.every(c => c.included);
   charges = charges.slice(-500); // keep ledger bounded
-  return { usd, ai, source, byLabel, count: items.length };
+  return { usd, ai, source, byLabel, count: items.length, aiIncluded };
 }
 
 function totals() {
@@ -85,4 +98,4 @@ function fmt(usd) {
   return '$' + usd.toFixed(usd < 1 ? 3 : 2);
 }
 
-module.exports = { recordLLM, recordSource, beginRun, endRun, totals, fmt, LLM_PRICES, SOURCE_PRICES };
+module.exports = { recordLLM, recordIncluded, recordSource, beginRun, endRun, totals, fmt, LLM_PRICES, SOURCE_PRICES };

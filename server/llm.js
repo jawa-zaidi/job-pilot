@@ -1,8 +1,12 @@
-// LLM client — supports Groq, OpenAI (ChatGPT) and Anthropic (Claude),
+// LLM client — supports Groq, OpenAI (ChatGPT), Anthropic (Claude) and a
+// Claude Pro/Max subscription via the locally installed Claude Code CLI,
 // selectable in Settings, with a model override and a user-editable custom
 // system prompt that is injected into scoring / CV / email generation. Falls
 // back to deterministic mock output when no API key is configured.
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+const { execFile, execFileSync } = require('child_process');
+const os = require('os');
+const path = require('path');
 const { load } = require('./db');
 const P = require('./prompts'); // all quality-critical system prompts live in prompts.js
 
@@ -29,16 +33,185 @@ const PROVIDERS = {
     defaultModel: 'claude-haiku-4-5-20251001',
     envKey: 'ANTHROPIC_API_KEY',
     anthropic: true // uses the Messages API shape, not the OpenAI one
+  },
+  claude_code: {
+    label: 'Claude subscription (no API key)',
+    url: '',
+    // Haiku by default: a subscription has no per-token cost, but it does have
+    // usage limits, and a batch run scores jobs in many chunks. Users who want
+    // better CVs can put claude-sonnet-5 in the model box at no extra charge.
+    defaultModel: 'claude-haiku-4-5',
+    cli: true // runs the local Claude Code CLI instead of an HTTP endpoint
   }
 };
 
+// ---------- Claude subscription via the Claude Code CLI ----------
+// The CLI is already signed in to the user's own Claude account, so this
+// provider needs no API key and bills nothing per token. We drive it as a pure
+// text completion: no tools, no session files, no project settings, and a
+// neutral working directory so it can never touch the user's files.
+
+const CLI_ARGS = [
+  '-p',                          // non-interactive: print the answer and exit
+  '--output-format', 'json',     // machine-readable envelope; text is in .result
+  '--tools', '',                 // no tools at all — it cannot read or write anything
+  '--strict-mcp-config',         // ignore any MCP servers the user has configured
+  '--disable-slash-commands',    // no skills
+  '--setting-sources', '',       // no user/project settings, no CLAUDE.md discovery
+  '--no-session-persistence'     // leave no transcripts behind
+];
+
+// Where the CLI usually lives. `claude` alone covers anything already on PATH;
+// the rest are the common installer targets for when the server was started
+// from a launcher with a minimal PATH.
+const CLI_CANDIDATES = [
+  process.env.CLAUDE_CLI_PATH,
+  'claude',
+  path.join(os.homedir(), '.local', 'bin', 'claude'),
+  '/opt/homebrew/bin/claude',
+  '/usr/local/bin/claude'
+].filter(Boolean);
+
+// Re-probe a working CLI rarely, a broken one often — so the Settings screen
+// recovers quickly once the user actually runs `claude login`.
+const CLI_OK_TTL_MS = 5 * 60 * 1000;
+const CLI_FAIL_TTL_MS = 15 * 1000;
+let cliProbe = null; // { at, bin, ok, reason, plan }
+
+// The CLI prefers ANTHROPIC_API_KEY over the subscription login, and this file
+// loads .env at require time — so a stray key in the environment would quietly
+// put a "no API key" provider back on per-token billing. Strip both auth vars.
+function cliEnv() {
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  return env;
+}
+
+function probeClaudeCode() {
+  for (const bin of CLI_CANDIDATES) {
+    let out;
+    try {
+      out = execFileSync(bin, ['auth', 'status', '--json'], {
+        encoding: 'utf8',
+        timeout: 10000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        cwd: os.tmpdir(),
+        env: cliEnv()
+      });
+    } catch {
+      continue; // not installed at this path (or it failed to run) — try the next
+    }
+    let status;
+    try { status = JSON.parse(out); } catch { status = null; }
+    // Deliberately only read loggedIn/subscriptionType — the same payload also
+    // carries the account email and org id, which are none of our business.
+    if (!status) {
+      return { bin, ok: false, reason: 'Claude is on this computer but it did not answer clearly when we asked whether you were signed in. Open Claude, sign in, and come back to Settings.' };
+    }
+    if (!status.loggedIn) {
+      // "not signed in" is the phrase the Settings screen looks for — keep it.
+      return { bin, ok: false, reason: 'Claude is on this computer but nobody is signed in yet. Sign in there, then come back to Settings.' };
+    }
+    return { bin, ok: true, plan: String(status.subscriptionType || '') };
+  }
+  // "not found" is the phrase the Settings screen looks for — keep it.
+  return { bin: '', ok: false, reason: 'Claude was not found on this computer. Install it from claude.com/code and sign in, or paste a code from one of the other options instead.' };
+}
+
+function claudeCode() {
+  const now = Date.now();
+  const ttl = cliProbe && cliProbe.ok ? CLI_OK_TTL_MS : CLI_FAIL_TTL_MS;
+  if (cliProbe && now - cliProbe.at < ttl) return cliProbe;
+  cliProbe = Object.assign({ at: now }, probeClaudeCode());
+  return cliProbe;
+}
+
+// Called when settings change so a freshly selected provider is checked now,
+// not up to a cache-lifetime later.
+function resetClaudeCodeProbe() { cliProbe = null; }
+
+// Shape the Settings screen renders: "Detected ✓" vs "Not found".
+function claudeCodeStatus() {
+  const p = claudeCode();
+  return {
+    available: p.ok,
+    plan: p.ok ? (p.plan || '') : '',
+    detail: p.ok
+      ? `Found it — you're signed in${p.plan ? ` on the ${p.plan} plan` : ''}, and the writing is included in what you already pay for.`
+      : p.reason
+  };
+}
+
+// Errors from this route are tagged so friendlyError() leaves them alone: they
+// already say what to do, and advice about pasted codes doesn't apply here.
+function cliError(message) {
+  const err = new Error(message);
+  err.claudeCode = true;
+  err.plain = true;    // safe to show a person as it is
+  return err;
+}
+
+// Run one completion through the CLI. Rejects (never resolves half-broken) so
+// the existing strictJSON / catch paths handle it exactly like an API failure.
+function runClaudeCode(system, prompt, model) {
+  const probe = claudeCode();
+  if (!probe.ok) return Promise.reject(cliError(probe.reason));
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      probe.bin,
+      [...CLI_ARGS, '--model', model, '--system-prompt', system],
+      {
+        cwd: os.tmpdir(),        // neutral cwd — never the user's project
+        env: cliEnv(),
+        timeout: LLM_TIMEOUT_MS, // Node kills the child itself once this elapses
+        killSignal: 'SIGKILL',
+        maxBuffer: 16 * 1024 * 1024
+      },
+      (err, stdout) => {
+        if (err) {
+          if (err.killed || err.signal) {
+            return reject(cliError('Claude on this computer took too long to answer — try again, or choose a different writer in Settings.'));
+          }
+          console.error('Claude Code CLI failed:', String(err.message || err).slice(0, 200));
+          return reject(cliError('Claude on this computer would not run just now. Open Claude, check you are signed in, and try again.'));
+        }
+        let data;
+        try { data = JSON.parse(stdout); } catch {
+          return reject(cliError('Claude on this computer answered with something we could not read. Check you are still signed in there, and try again.'));
+        }
+        if (data.is_error || data.subtype !== 'success') {
+          console.error('Claude Code CLI error:', String(data.result || data.subtype || 'unknown').slice(0, 200));
+          return reject(cliError('Claude on this computer could not finish that one — try again in a moment.'));
+        }
+        // A subscription has no per-token dollar cost — record the usage for
+        // transparency but never invent a price for it.
+        const u = data.usage || {};
+        try {
+          require('./costs').recordIncluded(model, u.input_tokens || 0, u.output_tokens || 0);
+        } catch { /* best-effort */ }
+        resolve(String(data.result || ''));
+      }
+    );
+    child.stdin.end(prompt); // prompt goes over stdin, never the command line
+  });
+}
+
 function cfg() {
   const s = load().settings || {};
-  const name = ['openai', 'anthropic'].includes(s.provider) ? s.provider : 'groq';
+  const name = ['openai', 'anthropic', 'claude_code'].includes(s.provider) ? s.provider : 'groq';
   const p = PROVIDERS[name];
+  const model = (s.model || '').trim() || p.defaultModel;
+  if (p.cli) {
+    // There is no key to configure here, so CLI availability stands in for one:
+    // present and signed in behaves like a valid key, missing behaves like a
+    // missing key (clear message + mock fallback) rather than a crash.
+    const probe = claudeCode();
+    return { provider: name, label: p.label, url: '', key: probe.ok ? 'subscription' : '', model, anthropic: false, cli: true };
+  }
   const keyBySetting = { groq: s.groqKey, openai: s.openaiKey, anthropic: s.anthropicKey };
   const key = keyBySetting[name] || process.env[p.envKey] || '';
-  return { provider: name, label: p.label, url: p.url, key, model: (s.model || '').trim() || p.defaultModel, anthropic: !!p.anthropic };
+  return { provider: name, label: p.label, url: p.url, key, model, anthropic: !!p.anthropic };
 }
 
 // Anthropic has no JSON mode; models occasionally wrap JSON in prose or code
@@ -52,7 +225,12 @@ function extractJsonText(text) {
 }
 
 function hasKey() { return !!cfg().key; }
-function providerInfo() { const c = cfg(); return { provider: c.provider, model: c.model, hasKey: !!c.key }; }
+function providerInfo() {
+  const c = cfg();
+  // subscription: true means "working, and costs nothing per token" — the UI
+  // and the cost ledger both key off it.
+  return { provider: c.provider, model: c.model, hasKey: !!c.key, subscription: !!c.cli && !!c.key };
+}
 // Per-step instructions: 'find' (job scoring), 'cv', 'email'. Falls back to the
 // legacy single customPrompt when a step-specific one isn't set.
 function promptFor(kinds = []) {
@@ -79,6 +257,28 @@ async function chat(messages, { json = false, maxTokens = 2048, promptKinds = nu
   const custom = promptKinds ? promptFor(promptKinds) : '';
   const systemText = P.withUserInstructions(messages[0].content, custom);
   const rest = messages.slice(1);
+
+  if (c.cli) {
+    // The CLI takes one system prompt and one prompt on stdin, so extra
+    // system-role turns (e.g. a revision request) are folded into the system
+    // text exactly as the Anthropic branch does, and the conversation is
+    // flattened into a single prompt. There is no response_format, so JSON is
+    // requested in the prompt and pulled back out with extractJsonText().
+    const extraSystem = rest.filter(m => m.role === 'system').map(m => m.content);
+    const convo = rest.filter(m => m.role !== 'system');
+    const fullSystem = [
+      'You are a text-completion engine inside the JobPilot app. You have no tools and no filesystem access. Answer the request directly, with no preamble and no questions back.',
+      systemText,
+      ...extraSystem
+    ]
+      .concat(json ? ['Respond with ONLY a single JSON object — no prose, no markdown code fences.'] : [])
+      .join('\n\n');
+    const prompt = convo
+      .map(m => (m.role === 'assistant' ? `Your previous answer:\n${m.content}` : m.content))
+      .join('\n\n');
+    const text = await runClaudeCode(fullSystem, prompt, c.model);
+    return json ? extractJsonText(text) : text;
+  }
 
   let res;
   try {
@@ -447,4 +647,4 @@ async function insightsReport(profile, snap, trigger) {
   };
 }
 
-module.exports = { hasKey, providerInfo, extractProfile, scoreJobs, tailorApplication, formatEmailBody, reviewTailored, classifyReply, followUpEmail, insightsReport, devFeedbackReport, PROVIDERS };
+module.exports = { hasKey, providerInfo, claudeCodeStatus, resetClaudeCodeProbe, extractJsonText, extractProfile, scoreJobs, tailorApplication, formatEmailBody, reviewTailored, classifyReply, followUpEmail, insightsReport, devFeedbackReport, PROVIDERS };

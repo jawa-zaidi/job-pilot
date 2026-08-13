@@ -95,6 +95,55 @@ test('mock pipeline: profile extraction → scoring → tailoring runs without c
   assert.ok(tailored.cv && tailored.email_subject && tailored.email_body, 'application tailored in mock mode');
 });
 
+// The "Claude subscription" provider has no API key, so its mock-mode gate is
+// CLI availability instead. These run the same on a machine with the Claude
+// Code CLI installed and one without — they assert the relationship, not a
+// fixed outcome.
+test('claude_code provider is CLI-routed and carries no API key of its own', () => {
+  const p = llm.PROVIDERS.claude_code;
+  assert.ok(p, 'claude_code is a first-class provider');
+  assert.strictEqual(p.cli, true, 'routes through the CLI, not an HTTP endpoint');
+  assert.strictEqual(p.url, '', 'has no HTTP endpoint');
+  assert.strictEqual(p.envKey, undefined, 'must never pick up a key from the environment');
+});
+
+test('claude_code detection reports an actionable state', () => {
+  const st = llm.claudeCodeStatus();
+  assert.strictEqual(typeof st.available, 'boolean');
+  assert.ok(st.detail && st.detail.length > 0, 'always explains the state to the user');
+  // A missing/unauthenticated CLI must say what to do, never fail silently.
+  if (!st.available) assert.match(st.detail, /claude/i);
+});
+
+test('selecting claude_code enters mock mode exactly when the CLI is unavailable', () => {
+  const db = require('../server/db');
+  const data = db.load();
+  const previous = data.settings.provider;
+  try {
+    data.settings.provider = 'claude_code';
+    db.save();
+    const info = llm.providerInfo();
+    assert.strictEqual(info.provider, 'claude_code');
+    // The core semantic: available CLI ⇒ not mock mode; missing CLI ⇒ mock mode.
+    assert.strictEqual(llm.hasKey(), llm.claudeCodeStatus().available);
+    assert.strictEqual(info.subscription, llm.claudeCodeStatus().available);
+
+    // Unknown values still fall back to groq, so old stores keep working.
+    data.settings.provider = 'something-else';
+    db.save();
+    assert.strictEqual(llm.providerInfo().provider, 'groq');
+  } finally {
+    data.settings.provider = previous;
+    db.save();
+  }
+});
+
+test('extractJsonText unwraps the fenced JSON the Claude Code CLI returns', () => {
+  // The CLI has no response_format, so JSON mode relies on this helper.
+  const fenced = '```json\n{"score": 78, "reasons": ["a"]}\n```';
+  assert.deepStrictEqual(JSON.parse(llm.extractJsonText(fenced)), { score: 78, reasons: ['a'] });
+});
+
 test('recruiter-email extraction prefers role/personal addresses and skips generic', () => {
   const { extractRecruiterEmail } = require('../server/jobs');
   assert.strictEqual(extractRecruiterEmail('Apply at careers@acme.com'), 'careers@acme.com');
