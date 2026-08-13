@@ -764,6 +764,774 @@ function renderActivity(items) {
 }
 
 /* ===========================================================================
+ * THE WELCOME QUESTIONS — five questions, one per screen.
+ *
+ * Replaces the old six-step setup wizard. Two deliberate differences:
+ *
+ *  1. Nothing technical is asked here. There is no question about an AI
+ *     service and no question about email. A brand-new person can answer all
+ *     five and land on a working app without pasting a single key.
+ *  2. The two things that DO eventually need a key are asked at the moment
+ *     they are actually needed — see "Asked at the last moment" below.
+ *
+ * There is no second state store: every answer goes through the same
+ * /api/settings the rest of the app reads (`quiet: true` keeps the five saves
+ * out of the activity feed), and the CV goes through the same /api/cv. The
+ * step number rides along in `onboarding.step`, so closing the browser half
+ * way through comes back to the question they were on.
+ * ======================================================================== */
+
+const OB_STEPS = ['name', 'cv', 'roles', 'places', 'sending', 'done'];
+
+// The question each screen asks. Shown as the card's heading, and again as
+// JobPilot's chat bubble once it has been answered.
+const OB_QUESTION = {
+  name: 'Hello — what should we call you?',
+  cv: 'Now your CV — one file, one time.',
+  roles: 'What kind of job are you after?',
+  places: 'Where would you like to work?',
+  sending: 'Last one. Who presses send?'
+};
+
+const OB_REMOTE = 'Anywhere I can work from home';
+
+let ob = {
+  hydrated: false,
+  i: 0,
+  name: '',
+  profile: null,
+  cvName: '',          // this session only — the server doesn't keep the file name
+  roleChips: [],       // suggestions, from the CV and from what's already saved
+  roles: [],           // the ones they picked
+  placeChips: [],
+  places: [],
+  remote: true,
+  sending: null,
+  busy: false
+};
+
+const obStep = () => OB_STEPS[ob.i];
+const obFirstName = () => (ob.name || ob.profile?.name || '').trim().split(/\s+/)[0] || '';
+
+function obInitials(name) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '·';
+  return (words[0][0] + (words.length > 1 ? words[words.length - 1][0] : '')).toUpperCase();
+}
+
+const obUniq = list => [...new Set(list.map(x => String(x || '').trim()).filter(Boolean))];
+
+// One place worth suggesting — and it comes from their CV, which is the only
+// thing here that actually knows where they are.
+//
+// This used to read the computer's clock ("Asia/Calcutta" → "Calcutta"), which
+// offered Calcutta to a CV that says London, Delhi to somebody in Delhi and
+// Kiev to somebody in Kyiv: IANA zone names are regions with legacy spellings,
+// not addresses. If the CV doesn't say, we don't guess — they can type it.
+function obCvPlace() {
+  const raw = String(ob.profile?.location || '').trim();
+  if (!raw) return '';
+  const first = raw.split(/[|•·\n]/)[0].trim().replace(/[,;]\s*$/, '');
+  return first.length > 1 && first.length < 60 ? first : '';
+}
+
+/* ---------- Reading and writing the same settings everything else uses ---- */
+
+// Everything we know about them, pulled from the server rather than kept in a
+// second store — so a reload, a different tab or the Settings screen all agree.
+async function obHydrate() {
+  const [s, p] = await Promise.all([
+    api('/api/settings').catch(() => state.settings || {}),
+    api('/api/profile').catch(() => ({ profile: null }))
+  ]);
+  ob.profile = p.profile || null;
+  ob.name = s.fromName || ob.profile?.name || '';
+
+  ob.roles = Array.isArray(s.jobTitles) ? [...s.jobTitles] : [];
+  ob.roleChips = obUniq([
+    ...(ob.profile?.target_roles || []),
+    ob.profile?.title || '',
+    ...ob.roles
+  ]).slice(0, 8);
+
+  const saved = Array.isArray(s.jobLocations) ? s.jobLocations : [];
+  ob.remote = s.remoteOk !== false;
+  ob.places = saved.filter(l => String(l).toLowerCase() !== 'remote');
+  ob.placeChips = obUniq([...ob.places, obCvPlace()]);
+
+  const stored = OB_STEPS.indexOf(s.onboarding?.step || '');
+  ob.i = stored >= 0 ? stored : 0;
+  ob.sending = ob.i > 4 ? (s.sendingMode || null) : null;
+  ob.hydrated = true;
+}
+
+// What each answer contributes to the settings the rest of the app reads.
+function obPatch(step) {
+  if (step === 'name') return { fromName: ob.name.trim() };
+  if (step === 'roles') return { jobTitles: ob.roles };
+  if (step === 'places') {
+    // "Remote" is a location the job filter understands on its own, so someone
+    // who picked only "anywhere I can work from home" gets exactly that rather
+    // than every job on earth.
+    const locations = ob.places.length ? [...ob.places] : (ob.remote ? ['Remote'] : []);
+    return { jobLocations: locations, remoteOk: ob.remote };
+  }
+  if (step === 'sending' && ob.sending) return { sendingMode: ob.sending };
+  return {};
+}
+
+// `quiet: true` so answering five questions doesn't put five "Settings updated"
+// lines into the activity feed of someone who has never seen it before.
+function obSave(patch) {
+  return api('/api/settings', { method: 'POST', body: { quiet: true, ...patch } });
+}
+
+/* ---------- Drawing it ---------------------------------------------------- */
+
+function obPlaceLabels() {
+  const out = [...ob.places];
+  if (ob.remote) out.push(OB_REMOTE);
+  return out;
+}
+
+// The answers so far, as a conversation: what we asked, what they said.
+function obChatHtml() {
+  const rows = [];
+  const bot = text => rows.push(`
+    <div class="jp-bubble-row">
+      <span class="jp-avatar jp-avatar--xs jp-avatar--round jp-avatar--brand">J</span>
+      <div class="jp-bubble">${esc(text)}</div>
+    </div>`);
+  const me = text => rows.push(`
+    <div class="jp-bubble-row">
+      <span class="jp-avatar jp-avatar--xs jp-avatar--round jp-avatar--accent">${esc(obInitials(ob.name))}</span>
+      <div class="jp-bubble jp-bubble--me">${esc(text)}</div>
+    </div>`);
+
+  const answers = [
+    () => ob.name,
+    () => (ob.profile ? `Uploaded my CV${ob.cvName ? ` — ${ob.cvName}` : ''}` : "I'll add my CV later"),
+    () => ob.roles.join(', ') || 'Whatever fits my CV',
+    () => obPlaceLabels().join(', ') || 'Anywhere',
+    () => (ob.sending === 'jobpilot' ? 'You send them for me' : "I'll send them myself")
+  ];
+
+  for (let i = 0; i < 5 && i < ob.i; i++) {
+    const said = answers[i]();
+    if (!said) continue;
+    bot(OB_QUESTION[OB_STEPS[i]]);
+    me(said);
+  }
+  if (obStep() === 'done' && ob.sending === 'jobpilot') {
+    bot("Great — we'll ask for your email address the first time we actually need it, not now.");
+  }
+  return rows.join('');
+}
+
+function obChipsHtml(chips, selected, kind) {
+  return chips.map(c => `<button type="button" class="jp-chip${selected.includes(c) ? ' is-on' : ''}"
+    data-chip="${esc(kind)}" data-value="${esc(c)}">${esc(c)}</button>`).join('');
+}
+
+function obCardHtml() {
+  const step = obStep();
+
+  if (step === 'name') return `
+    <h1 class="jp-h1">${esc(OB_QUESTION.name)}</h1>
+    <p class="jp-lede jp-ob-lede">This is the name companies will see on your applications.
+      Nothing else happens yet.</p>
+    <input class="jp-input" id="obInput" value="${esc(ob.name)}" placeholder="e.g. Mohammed Jawad"
+      autocomplete="name" aria-label="Your name">`;
+
+  if (step === 'cv') {
+    const body = ob.profile ? obProofHtml() : `
+      <div class="jp-card jp-card--dashed" id="obDrop">
+        <div class="jp-lede">Drag your CV here — PDF, Word or plain text</div>
+        <div class="jp-btns jp-ob-drop-btns">
+          <button type="button" class="jp-btn jp-btn--primary" id="obChooseCv">Choose a file</button>
+        </div>
+        <div class="jp-note">Don't have one handy?
+          <button type="button" class="jp-btn jp-btn--link" id="obCvLater">Do this bit later</button></div>
+      </div>`;
+    return `
+      <h1 class="jp-h1">${esc(OB_QUESTION.cv)}</h1>
+      <p class="jp-lede jp-ob-lede">We read it to learn what you do, then rewrite it to fit each job.
+        It stays on this computer.</p>
+      ${body}`;
+  }
+
+  if (step === 'roles') {
+    const fromCv = (ob.profile?.target_roles || []).length || ob.profile?.title;
+    return `
+      <h1 class="jp-h1">${esc(OB_QUESTION.roles)}</h1>
+      <p class="jp-lede jp-ob-lede">${fromCv
+        ? 'Everyday words are fine. We read these from your CV — tap the ones that sound right.'
+        : 'Everyday words are fine — no need to be clever.'}</p>
+      ${ob.roleChips.length ? `<div class="jp-chips jp-ob-chips">${obChipsHtml(ob.roleChips, ob.roles, 'role')}</div>` : ''}
+      <input class="jp-input jp-input--md" id="obInput" placeholder="Something else? Type it here"
+        aria-label="Another kind of job">`;
+  }
+
+  if (step === 'places') return `
+    <h1 class="jp-h1">${esc(OB_QUESTION.places)}</h1>
+    <p class="jp-lede jp-ob-lede">Pick as many as you like. We'll only bring you jobs from these places.</p>
+    <div class="jp-chips jp-ob-chips">
+      <button type="button" class="jp-chip${ob.remote ? ' is-on' : ''}" data-chip="remote"
+        data-value="${esc(OB_REMOTE)}">${esc(OB_REMOTE)}</button>
+      ${obChipsHtml(ob.placeChips, ob.places, 'place')}
+    </div>
+    <input class="jp-input jp-input--md" id="obInput" placeholder="Somewhere else? Type a town, city or country"
+      aria-label="Another place you'd work">`;
+
+  if (step === 'sending') return `
+    <h1 class="jp-h1">${esc(OB_QUESTION.sending)}</h1>
+    <p class="jp-lede jp-ob-lede">Either way we write every application for you.
+      This is only about who sends it.</p>
+    <button type="button" class="jp-choice${ob.sending === 'jobpilot' ? ' is-on' : ''}" data-send="jobpilot">
+      <div class="jp-choice-title">JobPilot sends them for me</div>
+      <div class="jp-choice-sub">We email each application from your address and chase it up after 3, 5 and
+        10 days. We'll ask for your email details the first time we need them.</div>
+    </button>
+    <button type="button" class="jp-choice${ob.sending === 'myself' ? ' is-on' : ''}" data-send="myself">
+      <div class="jp-choice-title">I'll send them myself</div>
+      <div class="jp-choice-sub">We still write every CV and message and remind you when to follow up.
+        You press send. Perfectly fine choice.</div>
+    </button>
+    <p class="jp-note">We never send anything to a company without showing you first.</p>`;
+
+  // done
+  return `
+    <div class="jp-ob-done">
+      <div class="jp-ob-icon">🎉</div>
+      <h1 class="jp-h1">That's everything${obFirstName() ? `, ${esc(obFirstName())}` : ''}.</h1>
+      <p class="jp-lede">We're looking for jobs now. From here on, JobPilot only asks when it
+        genuinely needs you — usually a minute or two a day.</p>
+      <button type="button" class="jp-btn jp-btn--primary" id="obFinish">Show me what you found</button>
+    </div>`;
+}
+
+// The moment that earns their trust: we read the file, here is what we got.
+function obProofHtml() {
+  const p = ob.profile || {};
+  const skills = (p.skills || []).slice(0, 10).join(', ');
+  const years = p.years_experience ? `, about ${p.years_experience} years` : '';
+  const rows = [
+    ['Your name', p.name || '—'],
+    ['What you do', (p.title || '—') + years],
+    p.location ? ['Where you are', p.location] : null,
+    skills ? ['Best at', skills] : null,
+    (p.target_roles || []).length ? ['Jobs it suits', p.target_roles.slice(0, 4).join(', ')] : null
+  ].filter(Boolean);
+  const rough = JobPilot.data?.settings && !JobPilot.data.settings.llmReady;
+  return `
+    <div class="jp-card jp-card--good">
+      <div class="jp-ob-proof-head">Read it — here's what we understood</div>
+      ${rows.map(([k, v]) => `<div class="jp-kv"><span class="jp-kv-key">${esc(k)}</span><span class="jp-kv-val">${esc(v)}</span></div>`).join('')}
+      <p class="jp-note jp-ob-proof-note">Wrong anywhere? You can fix all of it later — nothing is set in stone.${
+        rough ? ' We picked this out of the words on the page for now; once JobPilot has something to think with it will read your CV properly.' : ''}</p>
+    </div>
+    <div class="jp-btns jp-ob-reupload">
+      <button type="button" class="jp-btn jp-btn--quiet jp-btn--sm" id="obChooseCv">Use a different file</button>
+    </div>`;
+}
+
+function obFootHtml() {
+  const step = obStep();
+  if (step === 'done') return '';
+  const back = ob.i > 0
+    ? '<button type="button" class="jp-btn jp-btn--secondary" id="obBack">Back</button>' : '';
+  // "Who presses send?" has no Next — picking one of the two cards IS the answer.
+  // Back still shows, so the keyboard is never a one-way street.
+  const next = step === 'sending' ? '' :
+    `<button type="button" class="jp-btn jp-btn--primary jp-spacer" id="obNext">${
+      step === 'cv' && ob.profile ? 'Looks right' : 'Continue'}</button>`;
+  if (!back && !next) return '';
+  return `<div class="jp-ob-foot">${back}${next}</div>`;
+}
+
+function obRender({ focus = true } = {}) {
+  const dots = $('#obDots');
+  const count = $('#obCount');
+  const chat = $('#obChat');
+  const card = $('#obCard');
+  if (!dots || !card) return;
+
+  dots.innerHTML = [0, 1, 2, 3, 4]
+    .map(i => `<span class="jp-step-dot${i <= ob.i ? ' is-on' : ''}"></span>`).join('');
+  count.textContent = ob.i >= 5 ? 'Done' : `Question ${ob.i + 1} of 5`;
+  chat.innerHTML = obChatHtml();
+  card.innerHTML = obCardHtml() + obFootHtml();
+  // Nothing left to skip once every question is answered.
+  $('#obSkip')?.classList.toggle('jp-hidden', obStep() === 'done');
+  window.scrollTo(0, 0);
+
+  if (!focus) return;
+  // Whatever this screen most wants them to do: the box to type in, the file to
+  // pick, or — once the CV has been read — the button that says "looks right".
+  const first = card.querySelector(
+    obStep() === 'cv' && ob.profile ? '#obNext' : '#obInput, #obFinish, .jp-choice, #obChooseCv, #obNext');
+  if (first) first.focus({ preventScroll: true });
+}
+
+/* ---------- Moving between questions -------------------------------------- */
+
+// Anything typed into the free-text box counts as an answer, so nobody loses a
+// line they typed but never turned into a chip.
+function obCommitDraft() {
+  const input = $('#obInput');
+  if (!input) return;
+  const text = input.value.trim();
+  const step = obStep();
+  if (step === 'name') { ob.name = text; return; }
+  if (!text) return;
+  const added = text.split(',').map(t => t.trim()).filter(Boolean);
+  if (step === 'roles') {
+    ob.roleChips = obUniq([...ob.roleChips, ...added]);
+    ob.roles = obUniq([...ob.roles, ...added]);
+  } else if (step === 'places') {
+    ob.placeChips = obUniq([...ob.placeChips, ...added]);
+    ob.places = obUniq([...ob.places, ...added]);
+  }
+}
+
+async function obGo(delta) {
+  if (ob.busy) return;
+  obCommitDraft();
+  const step = obStep();
+  const target = Math.max(0, Math.min(OB_STEPS.length - 1, ob.i + delta));
+  ob.busy = true;
+  try {
+    // Saved on every move, forwards and back, so nothing they answered is ever
+    // only in the browser's memory.
+    //
+    // `welcomeDone: false` is written deliberately and on every move. Without
+    // it, the server's "does this install look established?" rule sees the CV
+    // and the answers land and decides — correctly, for an upgrade, wrongly for
+    // someone mid-flow — that this person has already been welcomed. Setting it
+    // explicitly means closing the browser at question three comes back to
+    // question three instead of dropping them into a half-answered dashboard.
+    await obSave({ welcomeDone: false, ...obPatch(step), onboarding: { step: OB_STEPS[target] } });
+  } catch (err) {
+    ob.busy = false;
+    toast(err.message, true); // stay put rather than lose what they just typed
+    return;
+  }
+  ob.busy = false;
+  ob.i = target;
+  obRender();
+}
+
+async function obPickSending(mode) {
+  ob.sending = mode === 'jobpilot' ? 'jobpilot' : 'myself';
+  await obGo(1);
+}
+
+// Skip: keep every answer given so far, don't ask again, land somewhere usable.
+async function obSkip() {
+  if (ob.busy) return;
+  obCommitDraft();
+  ob.busy = true;
+  try {
+    await obSave({ ...obPatch(obStep()), welcomeDone: true, onboarding: { step: '' } });
+  } catch (err) { toast(err.message, true); }
+  ob.busy = false;
+  await refresh().catch(() => {});
+  JobPilot.screens.go('home');
+  toast("No problem — we've kept what you told us. You can fill in the rest whenever you like.");
+}
+
+async function obFinish() {
+  if (ob.busy) return;
+  ob.busy = true;
+  try { await obSave({ welcomeDone: true, onboarding: { step: '' } }); }
+  catch (err) { toast(err.message, true); }
+  ob.busy = false;
+  await refresh().catch(() => {});
+  JobPilot.screens.go('home');
+  obStartFirstSearch();
+}
+
+// The done screen's button is the first search. It goes through exactly the same
+// button (and therefore the same "does this need a key?" gate) as every later one.
+function obStartFirstSearch() {
+  const btn = $('#smartBtn');
+  if (!btn || btn.disabled) return;
+  btn.click();
+}
+
+/* ---------- The CV ------------------------------------------------------- */
+
+// Same upload the rest of the app uses; only the words are different, because
+// "profile extracted — 7 skills found" is not a sentence for someone on their
+// second minute with the app.
+async function obUploadCv(file) {
+  if (!file) return;
+  const card = $('#obCard');
+  if (card) card.innerHTML = `<div class="jp-loading"><span class="jp-spinner"></span> Reading your CV…</div>`;
+  try {
+    const fd = new FormData();
+    fd.append('cv', file);
+    const res = await fetch('/api/cv', { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'We could not read that file. A PDF, Word file or plain text works best.');
+    ob.profile = data.profile || null;
+    ob.cvName = file.name || '';
+    if (!ob.name && ob.profile?.name) ob.name = ob.profile.name;
+    ob.roleChips = obUniq([
+      ...(ob.profile?.target_roles || []),
+      ob.profile?.title || '',
+      ...ob.roleChips
+    ]).slice(0, 8);
+    obRender();
+    refresh().catch(() => {});
+  } catch (err) {
+    obRender();
+    toast(err.message, true);
+  }
+}
+
+/* ---------- Wiring -------------------------------------------------------- */
+
+$('#obCvInput')?.addEventListener('change', e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  obUploadCv(file);
+});
+
+$('#obSkip')?.addEventListener('click', () => obSkip());
+
+$('#obCard')?.addEventListener('click', e => {
+  const chip = e.target.closest('[data-chip]');
+  if (chip) {
+    const kind = chip.dataset.chip;
+    const value = chip.dataset.value;
+    if (kind === 'remote') ob.remote = !ob.remote;
+    else {
+      const list = kind === 'role' ? ob.roles : ob.places;
+      const at = list.indexOf(value);
+      if (at >= 0) list.splice(at, 1); else list.push(value);
+    }
+    chip.classList.toggle('is-on');
+    return;
+  }
+  const choice = e.target.closest('[data-send]');
+  if (choice) { obPickSending(choice.dataset.send); return; }
+  if (e.target.closest('#obNext')) { obGo(1); return; }
+  if (e.target.closest('#obBack')) { obGo(-1); return; }
+  if (e.target.closest('#obChooseCv')) { $('#obCvInput').click(); return; }
+  if (e.target.closest('#obCvLater')) { obGo(1); return; }
+  if (e.target.closest('#obFinish')) { obFinish(); return; }
+});
+
+// Enter moves on, everywhere except where Enter already means something else.
+$('#obCard')?.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  if (['BUTTON', 'A', 'TEXTAREA', 'SUMMARY'].includes(e.target.tagName)) return;
+  e.preventDefault();
+  if (obStep() === 'done') obFinish(); else obGo(1);
+});
+
+// Drag a CV straight onto the box.
+$('#obCard')?.addEventListener('dragover', e => {
+  const drop = e.target.closest('#obDrop');
+  if (!drop) return;
+  e.preventDefault();
+  drop.classList.add('is-over');
+});
+$('#obCard')?.addEventListener('dragleave', e => {
+  e.target.closest('#obDrop')?.classList.remove('is-over');
+});
+$('#obCard')?.addEventListener('drop', e => {
+  const drop = e.target.closest('#obDrop');
+  if (!drop) return;
+  e.preventDefault();
+  drop.classList.remove('is-over');
+  obUploadCv(e.dataTransfer?.files?.[0]);
+});
+
+JobPilot.screens.register('welcome', {
+  onEnter() {
+    if (ob.hydrated) { obRender(); return; }
+    $('#obCard').innerHTML = '<div class="jp-loading"><span class="jp-spinner"></span> One moment…</div>';
+    obHydrate().then(() => obRender()).catch(err => {
+      $('#obCard').innerHTML = `<p class="jp-lede">We couldn't reach JobPilot just now.</p>
+        <p class="jp-note">${esc(err.message)}</p>`;
+    });
+  }
+});
+
+// The old sidebar's "Setup guide" button now replays the welcome questions.
+$('#setupBtn')?.addEventListener('click', async () => {
+  await obHydrate().catch(() => {});
+  ob.i = 0;
+  JobPilot.screens.go('welcome');
+  obRender();
+});
+
+/* ===========================================================================
+ * ASKED AT THE LAST MOMENT
+ *
+ * Two things JobPilot genuinely cannot do without, and neither is asked during
+ * the welcome questions:
+ *
+ *   · an AI service — asked the first time a search has to read a job advert
+ *   · email details — asked the first time applications are ready to go out
+ *
+ * Both hang off the buttons that start the work, on the capture phase, so the
+ * existing handlers are untouched: if the answer is "yes, go ahead" the click is
+ * simply replayed once the question is answered.
+ * ======================================================================== */
+
+let obGateFor = null;      // the button waiting on the answer
+let obGateReplaying = false;
+let obAiWaived = false;    // "carry on without one" — for this session
+let obEmailWaived = false;
+
+function obGateOpen(kind, btn, html) {
+  obGateFor = btn;
+  $('#obGateKicker').textContent = kind === 'ai' ? 'Before we look' : 'Before these go out';
+  $('#obGateBody').innerHTML = html;
+  $('#obGate').classList.remove('jp-hidden');
+  const first = $('#obGateBody').querySelector('.jp-choice, input, button');
+  if (first) first.focus({ preventScroll: true });
+}
+
+function obGateClose() {
+  $('#obGate').classList.add('jp-hidden');
+  obGateFor = null;
+}
+
+// Replay the click that was interrupted, now that the answer exists.
+async function obGateProceed() {
+  const btn = obGateFor;
+  obGateClose();
+  await refresh().catch(() => {});
+  if (!btn || !document.contains(btn) || btn.disabled) return;
+  obGateReplaying = true;
+  btn.click();
+  obGateReplaying = false;
+}
+
+function obAiGateHtml(s) {
+  const cc = s.claudeCode || {};
+  const plan = cc.plan ? ` on the ${cc.plan} plan` : '';
+  return `
+    <h2 class="jp-h2">Choose who writes for you</h2>
+    <p class="jp-lede jp-ob-lede">JobPilot uses an AI service to read job adverts and write your CVs and
+      emails. This is the first time it actually needs one — pick whichever suits you, and you can
+      change it whenever you like.</p>
+    ${cc.available ? `
+      <button type="button" class="jp-choice is-on" data-ai="claude_code">
+        <div class="jp-choice-title">Use your Claude subscription — nothing to paste</div>
+        <div class="jp-choice-sub">You're already signed in to Claude on this computer${esc(plan)}, so
+          there is nothing to set up and nothing more to pay.</div>
+      </button>` : ''}
+    <button type="button" class="jp-choice${cc.available ? '' : ' is-on'}" data-ai="groq">
+      <div class="jp-choice-title">Get a free key from Groq</div>
+      <div class="jp-choice-sub">Free to use. Make an account, copy the long code it shows you, paste it
+        below — about two minutes.</div>
+    </button>
+    <div id="obAiKeyBox" class="${cc.available ? 'jp-hidden' : ''}">
+      <label class="jp-field">
+        <span class="jp-field-label">Paste the code here</span>
+        <input class="jp-input jp-input--md" type="password" id="obGroqKey" autocomplete="off"
+          placeholder="${s.groqKeySet ? 'already saved — paste a new one to replace it' : 'it starts with gsk_'}">
+        <span class="jp-field-help"><a href="https://console.groq.com/keys" target="_blank" rel="noopener">Open
+          the page that gives you one ↗</a></span>
+      </label>
+    </div>
+    ${cc.available ? '' : `<p class="jp-note">Have a Claude Pro or Max subscription? You can use that
+      instead of a key — sign in to Claude on this computer and it will show up here.</p>`}
+    <div class="jp-btns jp-ob-gate-btns">
+      <button type="button" class="jp-btn jp-btn--primary" id="obAiSave">Save and carry on</button>
+      <button type="button" class="jp-btn jp-btn--link" id="obAiWaive">Carry on without one for now</button>
+    </div>
+    <p class="jp-note" id="obAiMsg" aria-live="polite"></p>
+    <p class="jp-note jp-ob-gate-note">Without one we can still go and look, and show you what turns up.
+      We just can't read each job closely or write your applications until you come back to this.</p>`;
+}
+
+function obEmailGateHtml(s) {
+  return `
+    <h2 class="jp-h2">Which email should these come from?</h2>
+    <p class="jp-lede jp-ob-lede">We send each application from your own address, so replies come
+      straight back to you and we can spot them. This is the first time we've needed it.</p>
+    <label class="jp-field">
+      <span class="jp-field-label">Your name, as it should appear on the email</span>
+      <input class="jp-input jp-input--md" id="obFromName" value="${esc(s.fromName || ob.name || '')}" autocomplete="name">
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">Your Gmail address</span>
+      <input class="jp-input jp-input--md" id="obSmtpUser" type="email" autocomplete="off"
+        value="${esc(s.smtpUser || '')}" placeholder="you@gmail.com">
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">The 16-letter password Google gives apps</span>
+      <input class="jp-input jp-input--md" id="obSmtpPass" type="password" autocomplete="off"
+        placeholder="abcd efgh ijkl mnop">
+      <span class="jp-field-help">This is not your normal Google password, it only works for sending and
+        reading mail, it stays on this computer, and you can cancel it at any time.</span>
+    </label>
+    <details class="jp-ob-help">
+      <summary class="jp-note">Where do I find that?</summary>
+      <ol class="jp-note">
+        <li>Open your Google Account and go to <b>Security</b></li>
+        <li>Switch on <b>2-Step Verification</b> if it isn't on already</li>
+        <li>Open <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">App
+          passwords</a> and make one called "JobPilot"</li>
+        <li>Google shows you 16 letters — copy them into the box above</li>
+      </ol>
+    </details>
+    <div class="jp-btns jp-ob-gate-btns">
+      <button type="button" class="jp-btn jp-btn--primary" id="obEmailSave">Save and send them</button>
+      <button type="button" class="jp-btn jp-btn--link" id="obEmailWaive">I'll send them myself</button>
+    </div>
+    <p class="jp-note" id="obEmailMsg" aria-live="polite"></p>
+    <p class="jp-note jp-ob-gate-note">Without this JobPilot still writes every application and hands it
+      to you to send by hand. That is a perfectly good way to use it.</p>`;
+}
+
+$('#obGateClose')?.addEventListener('click', () => obGateClose());
+$('#obGate')?.addEventListener('click', e => { if (e.target.id === 'obGate') obGateClose(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('#obGate')?.classList.contains('jp-hidden')) { e.preventDefault(); obGateClose(); }
+});
+
+$('#obGateBody')?.addEventListener('click', async e => {
+  const choice = e.target.closest('[data-ai]');
+  if (choice) {
+    $('#obGateBody').querySelectorAll('[data-ai]').forEach(c => c.classList.toggle('is-on', c === choice));
+    $('#obAiKeyBox').classList.toggle('jp-hidden', choice.dataset.ai !== 'groq');
+    if (choice.dataset.ai === 'groq') $('#obGroqKey')?.focus();
+    return;
+  }
+  if (e.target.closest('#obAiSave')) return obAiSave(e.target.closest('#obAiSave'));
+  if (e.target.closest('#obAiWaive')) {
+    obAiWaived = true;
+    obGateProceed();
+    return;
+  }
+  if (e.target.closest('#obEmailSave')) return obEmailSave(e.target.closest('#obEmailSave'));
+  if (e.target.closest('#obEmailWaive')) {
+    obEmailWaived = true;
+    try { await obSave({ sendingMode: 'myself' }); } catch { /* the choice still holds for this session */ }
+    obGateClose();
+    await refresh().catch(() => {});
+    toast("Fine — every one of them is written and waiting. Open a job to copy the message and take the CV, and send it whenever suits you.");
+    return;
+  }
+});
+
+async function obAiSave(btn) {
+  const picked = $('#obGateBody').querySelector('[data-ai].is-on')?.dataset.ai || 'groq';
+  const key = $('#obGroqKey')?.value.trim() || '';
+  const msg = $('#obAiMsg');
+  if (picked === 'groq' && !key) {
+    msg.textContent = 'Paste the code from that page into the box first.';
+    $('#obGroqKey')?.focus();
+    return;
+  }
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.innerHTML = '<span class="jp-spinner"></span> Checking…';
+  msg.textContent = '';
+  try {
+    await obSave(picked === 'claude_code' ? { provider: 'claude_code' } : { provider: 'groq', groqKey: key });
+    await api('/api/settings/test-ai', { method: 'POST' }); // one tiny real request — a bad paste says so now
+    btn.disabled = false;
+    btn.textContent = label;
+    toast('All set — carrying on.');
+    obGateProceed();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = label;
+    msg.textContent = err.message;
+  }
+}
+
+async function obEmailSave(btn) {
+  const msg = $('#obEmailMsg');
+  const user = $('#obSmtpUser').value.trim();
+  const pass = $('#obSmtpPass').value.trim();
+  if (!user) { msg.textContent = 'We need the address these should come from.'; $('#obSmtpUser').focus(); return; }
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.innerHTML = '<span class="jp-spinner"></span> Checking…';
+  msg.textContent = '';
+  try {
+    await obSave({ fromName: $('#obFromName').value.trim(), smtpUser: user, smtpPass: pass, sendingMode: 'jobpilot' });
+    await api('/api/settings/test-email', { method: 'POST' }); // sends them one mail, so they can see it worked
+    btn.disabled = false;
+    btn.textContent = label;
+    toast(`We sent a test to ${user} — have a look in your inbox (and the spam folder).`);
+    obGateProceed();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = label;
+    msg.textContent = err.message;
+  }
+}
+
+// The interception itself. Capture phase on the document, so it runs before the
+// button's own handler and can hold the click back without touching that code.
+//
+// Any screen can opt a button in: put `data-needs-ai` on anything that starts a
+// search or writes something, and `data-needs-email` on anything that sends. The
+// question is asked, the answer is saved, and then the click happens as normal.
+document.addEventListener('click', e => {
+  if (obGateReplaying) return;
+  const btn = e.target.closest('#smartBtn, #searchBtn, [data-needs-ai], [data-needs-email]');
+  if (!btn) return;
+  const s = JobPilot.data?.settings;
+  if (!s) return;
+  const action = btn.hasAttribute('data-needs-email') ? 'send'
+    : btn.hasAttribute('data-needs-ai') || btn.id === 'searchBtn' ? 'fetch'
+    : (btn.dataset.action || 'fetch');
+  const stop = () => { e.preventDefault(); e.stopPropagation(); };
+
+  // "Add your CV" is the answer to a question, not something that needs one.
+  if (action === 'cv') return;
+
+  if (action === 'send') {
+    // The gate is what stops real mail going out from an address nobody has
+    // confirmed. It used to be skipped whenever `sendingMode` was anything but
+    // 'jobpilot' — which is exactly the person who never agreed to send by
+    // email at all. Only an address already set up, or an explicit "I'll send
+    // them myself" answered here, closes it.
+    if (s.smtpConfigured || obEmailWaived) return;
+    stop();
+    obGateOpen('email', btn, obEmailGateHtml(s));
+    return;
+  }
+  if (!s.llmReady && !obAiWaived) {
+    stop();
+    obGateOpen('ai', btn, obAiGateHtml(s));
+  }
+}, true);
+// Self-scheduling refresh: poll every 3s while a run step is executing (so the
+// live status and counts update in near-real-time), otherwise every 30s.
+function scheduleRefresh() {
+  clearTimeout(state._refreshTimer);
+  const delay = activeOp() ? 3000 : 30000;
+  state._refreshTimer = setTimeout(async () => {
+    try { await refresh(); } catch { /* keep looping through transient errors */ }
+    scheduleRefresh();
+  }, delay);
+}
+
+// First run: ask the five welcome questions instead of dropping someone into a
+// dashboard full of empty columns. The server decides who sees them — finished
+// or skipped means never again, and an install that already has a CV, some
+// applications or any settings at all is left alone (see welcomeNeeded).
+(async () => {
+  await refresh();
+  if (state.settings?.welcomeNeeded && JobPilot.screens.current() !== 'welcome') {
+    JobPilot.screens.go('welcome');
+  }
+  scheduleRefresh();
+})();
+
+/* ===========================================================================
  * Installable app (PWA): service worker, install prompt, offline notice.
  * Self-contained on purpose — nothing above this line depends on it, and the
  * app behaves exactly as before in browsers that support none of it.

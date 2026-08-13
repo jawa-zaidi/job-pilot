@@ -858,3 +858,64 @@ pre.doc { background: var(--panel2); border: 1px solid var(--border); border-rad
   .jp-grid-2 { grid-template-columns: 1fr; }
 }
 
+/* ===========================================================================
+ * 7 · THE WELCOME QUESTIONS (owned by the onboarding screen)
+ *
+ * Appended, not woven in: nothing above this line was changed. Everything here
+ * is layout the component library had no equivalent for — the chrome-less
+ * full-window column the five questions sit in, and a handful of one-off
+ * spacings taken straight from the comp. Colours come from the tokens only.
+ * ======================================================================== */
+
+/* The whole window: a centred 660px column with the header hidden. */
+.jp-ob {
+  min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 40px 24px 80px;
+}
+.jp-ob-col { width: 100%; max-width: 660px; }
+
+/* Logo · progress dots · Skip, all on one line above the conversation. */
+.jp-ob-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 34px; }
+.jp-ob-logo { font-size: 22px; cursor: default; }
+.jp-ob-logo .jp-logo-mark { width: 26px; height: 26px; border-radius: 8px; font-size: 13px; }
+.jp-ob-progress { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.jp-ob-progress .jp-note { font-size: 13px; }
+.jp-ob-skip { font-size: 13px; color: var(--ink2); }
+.jp-ob-skip:hover { color: var(--ink); }
+
+/* The one card that holds whichever question is being asked. */
+.jp-ob-card { margin-top: 26px; animation: rise .3s ease; }
+.jp-ob-card .jp-h1 { margin-bottom: 10px; }
+.jp-ob-lede { margin-bottom: 22px; }
+.jp-ob-chips { margin-bottom: 18px; }
+.jp-ob-note { margin-top: 20px; }
+
+/* Question 2: the drop zone, and the proof card that answers it. */
+.jp-ob-drop-btns { justify-content: center; margin: 16px 0; }
+#obDrop.is-over { border-color: var(--accent); background: var(--accentSoft); }
+.jp-ob-proof-head { font-weight: 600; color: var(--good); margin-bottom: 12px; }
+.jp-ob-proof-note { margin-top: 12px; }
+.jp-ob-reupload { margin-top: 14px; }
+
+/* Back on the left, Continue pushed right (with .jp-spacer). */
+.jp-ob-foot { display: flex; align-items: center; gap: 12px; margin-top: 26px; }
+
+/* The last screen. */
+.jp-ob-done { text-align: center; padding: 8px 0 4px; }
+.jp-ob-done .jp-lede { max-width: 440px; margin: 0 auto 22px; }
+.jp-ob-icon { font-size: 40px; margin-bottom: 8px; }
+
+/* The two questions asked later, in the shared slide-over. */
+.jp-ob-gate-btns { margin-top: 20px; align-items: center; }
+.jp-ob-gate-note { margin-top: 16px; }
+.jp-ob-help { margin: 4px 0 8px; }
+.jp-ob-help summary { cursor: pointer; }
+.jp-ob-help ol { margin: 8px 0 0; padding-left: 20px; }
+.jp-ob-help li { margin-bottom: 4px; }
+
+@media (max-width: 620px) {
+  .jp-ob { padding: 24px 16px 60px; }
+  .jp-ob-card .jp-h1 { font-size: 30px; }
+}
+
