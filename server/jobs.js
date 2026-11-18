@@ -144,6 +144,19 @@ function isRecent(job, maxAgeDays) {
   return age == null ? true : age <= maxAgeDays; // unknown date → keep (don't over-filter)
 }
 
+// Cities that go by more than one name. Job sites mix them freely ("Bangalore"
+// in your settings, "Bengaluru, Karnataka" on the listing), so a plain text
+// match silently threw those jobs away.
+const PLACE_ALIASES = [
+  ['bangalore', 'bengaluru'], ['bombay', 'mumbai'], ['gurgaon', 'gurugram'],
+  ['calcutta', 'kolkata'], ['madras', 'chennai'], ['delhi', 'new delhi', 'ncr'],
+  ['poona', 'pune'], ['trivandrum', 'thiruvananthapuram'], ['mysore', 'mysuru']
+];
+function placeNames(p) {
+  const group = PLACE_ALIASES.find(g => g.includes(p));
+  return group || [p];
+}
+
 // Does a job's location satisfy the user's preferred locations?
 function matchesLocation(job, prefs) {
   const loc = (job.location || '').toLowerCase();
@@ -160,7 +173,7 @@ function matchesLocation(job, prefs) {
   return prefs.locations.some(l => {
     const p = l.toLowerCase();
     if (p === 'remote') return remoteish;
-    return loc.includes(p);
+    return placeNames(p).some(name => loc.includes(name));
   });
 }
 
@@ -489,4 +502,4 @@ async function searchJobs(query, limit = 10) {
   return { jobs: unique, source: used.join(' + '), filtered };
 }
 
-module.exports = { searchJobs, sourcesConfig, jobPrefs, canonicalKey, normCompany, extractRecruiterEmail, isJunkContact, clearAtsCache };
+module.exports = { searchJobs, sourcesConfig, jobPrefs, canonicalKey, normCompany, extractRecruiterEmail, isJunkContact, clearAtsCache, matchesLocation };
