@@ -28,7 +28,7 @@ const IS_WIN = process.platform === 'win32';
 // dependencies already in place, so there is nothing to fetch and no npm to
 // fetch it with. A `git clone` has neither, and takes the original path.
 const BUNDLED = fs.existsSync(path.join(ROOT, 'runtime'))
-  && fs.existsSync(path.join(ROOT, 'node_modules'));
+  && !missingDependency();
 
 // Anything we start should find the same Node we are running on, not whatever
 // else happens to be installed.
@@ -229,13 +229,28 @@ function tryGitUpdate() {
   else say('  (Couldn\'t check for updates — carrying on with the version you have.)');
 }
 
+// The first package from package.json that is not actually installed, or
+// null. A node_modules folder can exist and still be empty or half there (a
+// clean-up tool emptied it, an install was interrupted), and then the server
+// crashed on "Cannot find module 'express'" because the folder's mere
+// presence looked like a finished install.
+function missingDependency(root = ROOT) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    return Object.keys(pkg.dependencies || {})
+      .find((name) => !fs.existsSync(path.join(root, 'node_modules', name, 'package.json'))) || null;
+  } catch {
+    return null; // no readable package.json: nothing we can check
+  }
+}
+
 function needsInstall() {
   // Everything arrived in the download, already installed. Nothing to check,
   // nothing to fetch, and the first run is instant even with no internet.
   if (BUNDLED) return false;
 
   const modules = path.join(ROOT, 'node_modules');
-  if (!fs.existsSync(modules)) return true;
+  if (!fs.existsSync(modules) || missingDependency()) return true;
 
   // npm writes node_modules/.package-lock.json after a successful install, so
   // it is the honest record of "what is on disk right now".
@@ -257,7 +272,9 @@ function needsInstall() {
 function installDependencies() {
   if (!needsInstall()) return false;
 
-  const firstTime = !fs.existsSync(path.join(ROOT, 'node_modules'));
+  // Missing packages, not just a missing folder: an emptied node_modules is a
+  // first-time install too.
+  const firstTime = !!missingDependency();
 
   // A downloaded copy is meant to arrive complete. If its node_modules folder
   // has gone missing, npm is not the answer — the download does not include
@@ -504,10 +521,14 @@ async function main() {
   notify('JobPilot is ready. Quit it from the Dock when you are done.');
 }
 
-main().catch((err) => {
-  say('');
-  say(`  ❌ Unexpected problem: ${err && err.message ? err.message : err}`);
-  say('     Try double-clicking JobPilot again.');
-  say('');
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    say('');
+    say(`  ❌ Unexpected problem: ${err && err.message ? err.message : err}`);
+    say('     Try double-clicking JobPilot again.');
+    say('');
+    process.exit(1);
+  });
+}
+
+module.exports = { missingDependency };
