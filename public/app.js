@@ -175,6 +175,20 @@ function toast(msg, isErr = false) {
   t._h = setTimeout(() => (t.className = 'toast'), 6000);
 }
 
+// A toast with one button in it (Undo), kept up a little longer.
+function toastAction(msg, label, onClick) {
+  const t = $('#toast');
+  t.textContent = msg + ' ';
+  const b = document.createElement('button');
+  b.className = 'toast-action';
+  b.textContent = label;
+  b.addEventListener('click', () => { t.className = 'toast'; onClick(); });
+  t.appendChild(b);
+  t.className = 'toast show has-action';
+  clearTimeout(t._h);
+  t._h = setTimeout(() => (t.className = 'toast'), 8000);
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -905,6 +919,9 @@ function jobRowHtml(a) {
       </div>
       <span class="jp-row-meta">${esc(jobStateWords(a))}</span>
       <span class="jp-badge${fit.badge}">${fit.word}</span>
+      ${['discovered', 'approved'].includes(a.status)
+    ? `<button class="jp-row-skip" data-skip-job="${esc(a.id)}" title="Not interested: take it off your list">Skip</button>`
+    : ''}
     </div>`;
 }
 
@@ -955,10 +972,14 @@ function jobsScreenHtml(data) {
     // Say "sent" when the person is the one emailing them, "applied" when the
     // company only takes applications on its own form.
     const allByEmail = col.rows.every(a => a.recipientEmail) && sendsHerself(data);
+    // Weak fits you haven't applied to: one button clears them all.
+    const weak = col.rows.filter(isSkippableWeak);
     const bulk = col.id === 'needsyou' && col.rows.length > 1
       ? `<button class="jp-btn jp-btn--secondary jp-btn--xs jp-spacer" id="jobsAllApplied">${allByEmail
         ? "I've sent all of these" : "I've applied to all of these"}</button>`
-      : '';
+      : weak.length > 1
+        ? `<button class="jp-btn jp-btn--secondary jp-btn--xs jp-spacer" data-skip-weak="${esc(col.id)}">Skip all ${weak.length} weak fits</button>`
+        : '';
     return `
       <div style="margin-bottom:26px">
         <div class="jp-row-flex" style="gap:10px;margin-bottom:10px">
@@ -1030,13 +1051,65 @@ async function markAllApplied() {
   } catch (err) { toast(err.message, true); }
 }
 
+// A weak fit (under 55) you haven't applied to or had written: safe to clear in bulk.
+function isSkippableWeak(a) {
+  return ['discovered', 'approved'].includes(a.status) && !a.appliedAt && !a.tailored && (a.matchScore || 0) < 55;
+}
+
+// "Skip all N weak fits": one question (it is many at once), then Undo for all.
+async function skipAllWeak() {
+  const weak = ((JobPilot.data && JobPilot.data.applications) || state.applications).filter(isSkippableWeak);
+  if (!weak.length) return;
+  if (!confirm(`Skip all ${weak.length} weak fits?
+
+They come off your list and later searches won't bring them back. You can undo this for 10 minutes.`)) return;
+  try {
+    const ids = weak.map(a => a.id);
+    const r = await api('/api/applications/skip', { method: 'POST', body: { ids } });
+    for (const id of ids) document.querySelector(`#mount-jobs [data-job="${CSS.escape(id)}"]`)?.remove();
+    toastAction(`Skipped ${r.skipped} weak fit${r.skipped === 1 ? '' : 's'}. They won't come back.`, 'Undo', async () => {
+      try {
+        const back = await api('/api/applications/restore', { method: 'POST', body: { ids } });
+        toast(`${back.restored} back on your list`);
+        refresh();
+      } catch (err) { toast(err.message, true); }
+    });
+    refresh();
+  } catch (err) { toast(err.message, true); }
+}
+
+// Skip, right on the row: one click, no questions, with Undo in the toast.
+// For the ones you can tell from the title alone aren't for you.
+async function skipFromRow(id) {
+  const a = state.applications.find(x => x.id === id);
+  if (!a) return;
+  try {
+    await api(`/api/applications/${id}`, { method: 'DELETE' });
+    state.applications = state.applications.filter(x => x.id !== id);
+    // Gone from the list at once; the refresh below brings the counts up to date.
+    document.querySelector(`#mount-jobs [data-job="${CSS.escape(id)}"]`)?.remove();
+    toastAction(`Skipped ${a.title} at ${a.company}. It won't come back.`, 'Undo', async () => {
+      try {
+        await api(`/api/applications/${id}/restore`, { method: 'POST' });
+        toast('Back on your list');
+        refresh();
+      } catch (err) { toast(err.message, true); }
+    });
+    refresh();
+  } catch (err) { toast(err.message, true); }
+}
+
 // A row opens the panel. Delegated, so a re-render never loses the handler.
 document.addEventListener('click', e => {
+  if (e.target.closest('#mount-jobs [data-skip-weak]')) { skipAllWeak(); return; }
+  const skip = e.target.closest('#mount-jobs [data-skip-job]');
+  if (skip) { skipFromRow(skip.dataset.skipJob); return; }
   const row = e.target.closest('#mount-jobs [data-job]');
   if (row) openDrawer(row.dataset.job);
 });
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
+  if (e.target.closest && e.target.closest('[data-skip-job]')) return; // the button handles itself
   const row = e.target.closest && e.target.closest('#mount-jobs [data-job]');
   if (!row) return;
   e.preventDefault();
@@ -1273,7 +1346,18 @@ function nextStepsHtml(a) {
     <div class="jp-list jp-list--ruled jp-list--flat">${rows.join('')}</div>`;
 }
 
+// Only offer what makes sense for this job: no "I already applied" once you
+// have, and no "They said no" once it is over.
+function updateSkipMenu(a) {
+  const menu = $('#jobSkip');
+  if (!menu) return;
+  menu.open = false;
+  $('#jobSkipApplied')?.classList.toggle('jp-hidden', !!a.appliedAt);
+  $('#jobSkipRejected')?.classList.toggle('jp-hidden', ['rejected', 'closed'].includes(a.status));
+}
+
 function renderDrawer(a) {
+  updateSkipMenu(a);
   const t = a.tailored;
   const where = [a.company, a.location, sourceWords(a.source)].filter(Boolean).join(' · ');
 
@@ -1487,10 +1571,49 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && state.openId) { e.preventDefault(); closeDrawer(); }
 });
 
-// "Not interested" — drop the job altogether. The old drawer's Remove.
+// Skip → "I already applied": you applied on your own, outside JobPilot.
+$('#jobSkipApplied')?.addEventListener('click', async () => {
+  const a = state.applications.find(x => x.id === state.openId);
+  if (!a) return;
+  $('#jobSkip').open = false;
+  if (!confirm(`Have you already applied for ${a.title} at ${a.company}?
+
+We'll start tracking it and remind you to chase them up.`)) return;
+  try {
+    await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { manualApplied: true } });
+    toast("Got it — we're tracking this one now");
+    await refresh();
+  } catch (err) { toast(err.message, true); }
+});
+
+// Skip → "They said no": works before you applied too (a recruiter call, an
+// email elsewhere). It stays under Closed, so it never comes back.
+$('#jobSkipRejected')?.addEventListener('click', async () => {
+  const a = state.applications.find(x => x.id === state.openId);
+  if (!a) return;
+  $('#jobSkip').open = false;
+  if (!confirm(`Did ${a.company} turn you down for this one?
+
+We'll stop chasing it and keep it under Closed.`)) return;
+  try {
+    await api(`/api/applications/${a.id}`, { method: 'PATCH', body: { status: 'rejected' } });
+    toast("Sorry to hear it — we've stopped chasing this one");
+    await refresh();
+  } catch (err) { toast(err.message, true); }
+});
+
+// Close the Skip menu on a click anywhere else.
+document.addEventListener('click', e => {
+  const menu = $('#jobSkip');
+  if (menu?.open && !menu.contains(e.target)) menu.open = false;
+});
+
+// Skip → "Not interested": drop the job altogether. The server keeps a small
+// note of it so later searches don't add it again.
 $('#jobPanelDrop')?.addEventListener('click', async () => {
   const a = state.applications.find(x => x.id === state.openId);
   if (!a) return;
+  $('#jobSkip').open = false;
   if (!confirm(`Take ${a.title} at ${a.company} off your list?\n\n`
     + (a.appliedAt
       ? 'You have already applied to this one, so its history goes too.'

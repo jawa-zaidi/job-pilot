@@ -480,7 +480,16 @@
     <div class="jp-panel-head">
       <button class="jp-btn jp-btn--icon" id="jobPanelClose" aria-label="Close">✕</button>
       <div class="jp-lede" id="jobPanelState"></div>
-      <button class="jp-btn jp-btn--secondary jp-btn--xs jp-spacer" id="jobPanelDrop">Not interested</button>
+      <!-- Skip: take a job off your to-do list three ways. All three keep a
+           note of it, so later searches never bring it back. -->
+      <details class="jp-skip jp-spacer" id="jobSkip">
+        <summary class="jp-btn jp-btn--secondary jp-btn--xs">Skip ▾</summary>
+        <div class="jp-skip-menu" role="menu">
+          <button type="button" role="menuitem" id="jobSkipApplied">I already applied<span>Track it and remind me to chase it up</span></button>
+          <button type="button" role="menuitem" id="jobSkipRejected">They said no<span>Stop chasing it and keep it under Closed</span></button>
+          <button type="button" role="menuitem" id="jobPanelDrop">Not interested<span>Take it off my list for good</span></button>
+        </div>
+      </details>
     </div>
     <div class="jp-panel-body" id="jobPanelBody"></div>
   </div>

@@ -484,6 +484,19 @@ body.jp-chrome-off .jp-header { display: none; }
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.err { border-color: var(--bad); color: var(--bad); }
+.toast.show.has-action { pointer-events: auto; }
+.toast-action {
+  margin-left: 10px; background: none; border: 1px solid var(--line); border-radius: 8px;
+  padding: 4px 12px; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); cursor: pointer;
+}
+.toast-action:hover { background: var(--surface2); }
+
+/* Skip, beside the fit badge on each job row */
+.jp-row-skip {
+  flex-shrink: 0; margin-left: 10px; background: none; border: 1px solid var(--line);
+  border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 13px; color: var(--ink2); cursor: pointer;
+}
+.jp-row-skip:hover, .jp-row-skip:focus-visible { color: var(--bad); border-color: var(--bad); background: var(--badSoft); }
 
 /* ---- 5.14 Timeline (Home) ---------------------------------------------- */
 .jp-tl-item { display: flex; gap: 16px; }
@@ -525,6 +538,22 @@ body.jp-chrome-off .jp-header { display: none; }
   display: flex; align-items: center; gap: 14px;
 }
 .jp-panel-body { padding: 28px 28px 60px; }
+
+/* Skip menu in the job panel's header */
+.jp-skip { position: relative; }
+.jp-skip > summary { list-style: none; cursor: pointer; }
+.jp-skip > summary::-webkit-details-marker { display: none; }
+.jp-skip-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 5; min-width: 260px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow); padding: 6px; display: flex; flex-direction: column;
+}
+.jp-skip-menu button {
+  text-align: left; background: none; border: 0; border-radius: 8px; padding: 10px 12px;
+  font: inherit; font-size: 15px; color: var(--ink); cursor: pointer;
+}
+.jp-skip-menu button:hover, .jp-skip-menu button:focus-visible { background: var(--surface2); }
+.jp-skip-menu button span { display: block; font-size: 13px; color: var(--ink2); margin-top: 2px; }
 
 /* ---- 5.18 Long-form text blocks (a letter, a CV) ----------------------- */
 .jp-doc {

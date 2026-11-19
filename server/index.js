@@ -12,7 +12,7 @@ const { load, save, now, logActivity, isFirstRun, DATA_DIR, saveCvOriginal,
         welcomeSettings, sendingMode } = require('./db');
 const llm = require('./llm');
 const email = require('./email');
-const { sourcesConfig, clearAtsCache } = require('./jobs');
+const { sourcesConfig, clearAtsCache, canonicalKey } = require('./jobs');
 const { discover, autoSearchTick, autoSearchConfig, startAutoSearch } = require('./discovery');
 const batch = require('./batch');
 const insights = require('./insights');
@@ -334,11 +334,64 @@ app.get('/api/applications/:id/cv.pdf', async (req, res) => {
   }
 });
 
+// "Not interested" promises the job won't come back. Searches skip jobs
+// already on the board, so a deleted one used to be added again by the next
+// search. Keep a small note of it (no description, no CV) instead. The full
+// record is kept for 10 minutes only, so an accidental Skip can be undone;
+// after that only the small note stays.
+const UNDO_MS = 10 * 60 * 1000;
+function skipApplications(db, ids) {
+  const want = new Set(ids);
+  const gone = db.applications.filter(x => want.has(x.id));
+  const skipped = (db.skipped || []).map(s =>
+    s.record && now() - s.at > UNDO_MS ? { id: s.id, key: s.key, at: s.at } : s);
+  for (const g of gone) skipped.unshift({ id: g.id, key: g.key || canonicalKey(g), at: now(), record: g });
+  db.skipped = skipped.slice(0, 5000);
+  db.applications = db.applications.filter(x => !want.has(x.id));
+  return gone.length;
+}
+function restoreApplications(db, ids) {
+  let n = 0;
+  for (const id of ids) {
+    const i = (db.skipped || []).findIndex(s => s.id === id && s.record);
+    if (i === -1) continue;
+    const [entry] = db.skipped.splice(i, 1);
+    if (!db.applications.some(a => a.id === entry.record.id)) db.applications.push(entry.record);
+    n++;
+  }
+  return n;
+}
+
 app.delete('/api/applications/:id', (req, res) => {
   const db = load();
-  db.applications = db.applications.filter(x => x.id !== req.params.id);
+  skipApplications(db, [req.params.id]);
   save();
   res.json({ ok: true });
+});
+
+// Skip many at once ("Skip all weak fits"). Only jobs not yet applied to.
+app.post('/api/applications/skip', (req, res) => {
+  const db = load();
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(String);
+  const allowed = new Set(db.applications.filter(a => !a.appliedAt && ['discovered', 'approved'].includes(a.status)).map(a => a.id));
+  const n = skipApplications(db, ids.filter(id => allowed.has(id)));
+  if (n) logActivity(`Skipped ${n} job${n === 1 ? '' : 's'} you weren't interested in`, 'move');
+  save();
+  res.json({ ok: true, skipped: n });
+});
+
+// Undo a "Not interested" from the last 10 minutes: put the job back as it was.
+app.post('/api/applications/:id/restore', (req, res) => {
+  const db = load();
+  if (!restoreApplications(db, [req.params.id])) return res.status(404).json({ error: "That one can't be brought back any more." });
+  save();
+  res.json({ ok: true });
+});
+app.post('/api/applications/restore', (req, res) => {
+  const db = load();
+  const n = restoreApplications(db, (Array.isArray(req.body?.ids) ? req.body.ids : []).map(String));
+  save();
+  res.json({ ok: true, restored: n });
 });
 
 app.post('/api/applications/:id/tailor', async (req, res) => {

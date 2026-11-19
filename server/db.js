@@ -28,7 +28,8 @@ const WORKSPACE_DEFAULTS = {
   reports: [],            // improvement reports
   appliedSinceReport: 0,  // counter for the every-N-applications report
   runs: [],               // per-run ledger: what happened + real AI/API cost
-  currentRun: null        // the run in progress (fetch → generate → send)
+  currentRun: null,       // the run in progress (fetch → generate → send)
+  skipped: []             // jobs marked "Not interested": searches never add them again
 };
 
 let raw = null;     // { activeProfileId, profiles: {id: workspace}, settings, lastAutoSearchAt }
@@ -139,6 +140,7 @@ function load() {
     appliedSinceReport: ws.appliedSinceReport,
     runs: ws.runs,
     currentRun: ws.currentRun,
+    skipped: ws.skipped,
     settings: r.settings,
     lastAutoSearchAt: r.lastAutoSearchAt
   };
@@ -158,7 +160,8 @@ function save() {
     reports: c.reports,
     appliedSinceReport: c.appliedSinceReport,
     runs: c.runs,
-    currentRun: c.currentRun
+    currentRun: c.currentRun,
+    skipped: c.skipped
   };
   r.settings = c.settings;
   r.lastAutoSearchAt = c.lastAutoSearchAt;

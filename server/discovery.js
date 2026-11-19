@@ -54,8 +54,10 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
 
   // Skip anything already on the board — same source ID or the same
   // company+title from another source (reposts and cross-board duplicates).
-  const knownKeys = new Set(db.applications.map(a => a.key || canonicalKey(a)));
-  const knownIds = new Set(db.applications.map(a => a.id));
+  // ...and anything you marked "Not interested", which never comes back.
+  const notInterested = db.skipped || [];
+  const knownKeys = new Set([...db.applications.map(a => a.key || canonicalKey(a)), ...notInterested.map(s => s.key)]);
+  const knownIds = new Set([...db.applications.map(a => a.id), ...notInterested.map(s => s.id)]);
   // Company cooldown: recently applied there → don't pile on a second one yet
   const cd = cooldownDays() * 86400000;
   const recentCompanies = new Set(
