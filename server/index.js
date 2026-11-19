@@ -97,6 +97,16 @@ app.put('/api/profile', (req, res) => {
 
 // ---------- Job search ----------
 
+// "Check which are still open": re-read every saved job you haven't applied
+// to, now, and move the closed ones to Closed.
+app.post('/api/jobs/recheck', async (req, res) => {
+  try {
+    res.json(await batch.recheckSavedJobs({ maxAgeMs: 0 }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/jobs/search', async (req, res) => {
   try {
     res.json(await discover(req.body.query));

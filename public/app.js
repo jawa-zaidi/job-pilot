@@ -841,7 +841,7 @@ function jobStateWords(a) {
     case 'interview':  return 'they want to meet you';
     case 'offer':      return 'they offered you the job';
     case 'rejected':   return 'they said no';
-    case 'closed':     return a.appliedAt ? `no reply after ${spanWords(a.appliedAt)}` : 'closed';
+    case 'closed':     return a.appliedAt ? `no reply after ${spanWords(a.appliedAt)}` : (a.closedReason ? 'advert closed' : 'closed');
     default:           return '';
   }
 }
@@ -978,6 +978,10 @@ function jobsScreenHtml(data) {
       <h1 class="jp-title">My jobs</h1>
       <p class="jp-lede" style="margin:6px 0 26px">Everything JobPilot has found for you, in plain English.${sentLine}</p>
       ${running}
+      <div class="jp-row-flex" style="margin:-8px 0 18px">
+        <span class="jp-note">Adverts close all the time. We check before writing anything, and you can check now.</span>
+        <button class="jp-btn jp-btn--quiet jp-btn--xs jp-spacer" id="jobsRecheck">Check which are still open</button>
+      </div>
       ${groups}
       <p class="jp-note jp-note--center">Open any job to read what we wrote, or to tell us what happened.</p>
     </div>`;
@@ -994,6 +998,26 @@ function renderJobsScreen() {
   mount.innerHTML = html;
   mount.querySelector('#jobsFindFirst')?.addEventListener('click', e => findJobsNow(e.currentTarget));
   mount.querySelector('#jobsAllApplied')?.addEventListener('click', markAllApplied);
+  mount.querySelector('#jobsRecheck')?.addEventListener('click', e => recheckJobsNow(e.currentTarget));
+}
+
+// Re-read every saved job you haven't applied to, and move closed ones out.
+async function recheckJobsNow(btn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="jp-spinner"></span>Checking…';
+  try {
+    const r = await api('/api/jobs/recheck', { method: 'POST' });
+    if (!r.closed.length) {
+      toast(`All ${r.checked} still look open.`);
+    } else {
+      const names = r.closed.slice(0, 3).map(c => `${c.title} at ${c.company}`).join('; ');
+      toast(`${r.closed.length} of ${r.checked} had closed and moved to Closed: ${names}${r.closed.length > 3 ? '; and more' : ''}.`);
+    }
+    await refresh();
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false;
+  btn.textContent = label;
 }
 
 // The empty state's one button — the same endpoint the big Find button uses.

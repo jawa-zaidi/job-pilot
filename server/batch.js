@@ -17,7 +17,7 @@ const emailer = require('./email');
 const costs = require('./costs');
 const runs = require('./runs');
 const { discover } = require('./discovery');
-const { verifyJobLive } = require('./verify');
+const { verifyJobLive, filterOpenJobs } = require('./verify');
 const { cvToPdfBuffer, cvFileName } = require('./pdf');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -68,6 +68,9 @@ async function fetchBatch(target) {
   const db = load();
   if (!db.profile) throw new Error("We need your CV first — it's what every application is written from.");
   target = target || dailyTarget();
+  // Jobs already on the list can close after they were found: move those to
+  // Closed first (it also frees their places towards the target).
+  await recheckSavedJobs().catch(err => console.error('re-check failed:', err.message));
   runs.beginIfNeeded('manual'); // joins the auto run when one is already open
 
   const p = db.profile;
@@ -148,6 +151,8 @@ function approveAll() {
 // (Discovered). Each draft passes a fact-check (no invented claims) before it
 // counts as ready. Jobs without a recruiter email land in "Your action".
 async function generateAll({ statuses = ['discovered', 'approved'], minScore = 0 } = {}) {
+  // Never write a CV for an advert that has closed since it was found.
+  await recheckSavedJobs({ maxAgeMs: 0 }).catch(err => console.error('re-check failed:', err.message));
   const db = load();
   const targets = db.applications.filter(a => statuses.includes(a.status) && (a.matchScore || 0) >= minScore);
   const heldBack = db.applications.filter(a => statuses.includes(a.status) && (a.matchScore || 0) < minScore).length;
@@ -297,7 +302,41 @@ async function runAutoCycle(target) {
   return { fetch, generated, sendResult, run, cost: { usd: run ? run.costTotal : 0, ai: run ? run.costAI : 0, source: run ? run.costSource : 0 } };
 }
 
+// Re-check jobs already on the list that you haven't applied to, and move the
+// ones whose advert has clearly closed (deadline or end date passed, page
+// gone, page says closed or expired) to Closed, with the reason. Anything
+// uncertain stays. Jobs checked in the last `maxAgeMs` are skipped, so a
+// search doesn't re-read pages it has just read.
+async function recheckSavedJobs({ maxAgeMs = 12 * 3600000 } = {}) {
+  const db = load();
+  const jobs = db.applications.filter(a =>
+    ['discovered', 'approved'].includes(a.status) && !a.appliedAt &&
+    (!maxAgeMs || !a.checkedAt || now() - a.checkedAt > maxAgeMs));
+  if (!jobs.length) return { checked: 0, closed: [] };
+  const { open, dropped } = await filterOpenJobs(jobs, { concurrency: 4, timeoutMs: 8000 });
+  const fresh = load();
+  const byId = new Map(fresh.applications.map(a => [a.id, a]));
+  for (const j of open) { const a = byId.get(j.id); if (a) a.checkedAt = now(); }
+  const closed = [];
+  for (const { job, reason } of dropped) {
+    const a = byId.get(job.id);
+    if (!a || !['discovered', 'approved'].includes(a.status)) continue; // changed meanwhile
+    a.status = 'closed';
+    a.closedReason = reason;
+    a.closedAt = a.checkedAt = now();
+    a.notes = ((a.notes || '') + `
+Closed before you applied: ${reason}`).trim();
+    closed.push({ id: a.id, title: a.title, company: a.company, reason });
+  }
+  save();
+  if (closed.length) {
+    logActivity(`Checked ${jobs.length} saved job${jobs.length === 1 ? '' : 's'}: ${closed.length} had closed, so ${closed.length === 1 ? 'it moved' : 'they moved'} to Closed`, 'move');
+  }
+  return { checked: jobs.length, closed };
+}
+
 module.exports = {
+  recheckSavedJobs,
   fetchBatch, approveAll, generateAll, sendAll, runAutoCycle,
   dailyTarget, autoMinScore, sendPath, applySendingMode
 };

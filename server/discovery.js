@@ -4,6 +4,7 @@
 const { load, save, now, logActivity } = require('./db');
 const llm = require('./llm');
 const { searchJobs, canonicalKey, normCompany, extractRecruiterEmail } = require('./jobs');
+const { filterOpenJobs } = require('./verify');
 
 const MIN_SCORE = 40;      // discard poor fits (LLM match floor)
 const CHECK_EVERY_MS = 15 * 60 * 1000;
@@ -65,11 +66,19 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
   );
 
   let dupes = 0, cooled = 0;
-  const fresh = jobs.filter(j => {
+  const unseen = jobs.filter(j => {
     if (knownIds.has(j.id) || knownKeys.has(canonicalKey(j))) { dupes++; return false; }
     if (recentCompanies.has(normCompany(j.company))) { cooled++; return false; }
     return true;
   });
+
+  // Drop adverts that have clearly closed before they reach the board (or
+  // cost an AI scoring call): a stated deadline that has passed, a removed
+  // page, or a page that says it is closed. Uncertain results are kept.
+  const { open: fresh, dropped: closedJobs } = unseen.length
+    ? await filterOpenJobs(unseen)
+    : { open: [], dropped: [] };
+  const closed = closedJobs.length;
 
   // Best apply path: a real contact address in the posting
   for (const j of fresh) {
@@ -99,6 +108,7 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
       rankScore: Math.round(r.score + r.bonus),
       status: 'discovered',
       createdAt: now(),
+      checkedAt: now(), // just checked by filterOpenJobs above
       appliedAt: null,
       tailored: null,
       followups: [],
@@ -109,15 +119,16 @@ async function discover(query, { activityLabel = 'Job search', limit = 10, maxAd
   }
   db.applications.sort((a, b) => (b.rankScore || b.matchScore || 0) - (a.rankScore || a.matchScore || 0));
   save();
-  if (added || skipped || dupes || cooled) {
+  if (added || skipped || dupes || cooled || closed) {
     const extras = [
       skipped ? `${skipped} poor fits filtered` : '',
+      closed ? `${closed} closed or expired adverts left out` : '',
       dupes ? `${dupes} duplicates/reposts skipped` : '',
       cooled ? `${cooled} skipped (applied to that company recently)` : ''
     ].filter(Boolean).join(', ');
     logActivity(`${activityLabel} "${q}" via ${source}: ${added} good matches added${extras ? ` (${extras})` : ''}`, 'search');
   }
-  return { added, skipped, dupes, cooled, source, query: q, note: note || '' };
+  return { added, skipped, dupes, cooled, closed, source, query: q, note: note || '' };
 }
 
 function autoSearchConfig() {
