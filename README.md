@@ -298,9 +298,28 @@ first (before roles guessed from your CV) and matching jobs rank higher.
   straight from their public Greenhouse / Lever / Ashby / SmartRecruiters / Recruitee /
   Workable APIs: fresher than any job board, near-zero dead listings, links go to the real
   application form. No key, no account, and the highest reply rate of any source.
-- **Free boards** — Remotive, RemoteOK, Arbeitnow (on by default, nothing to set up).
+- **Free boards** — Remotive, RemoteOK, Arbeitnow (on by default, nothing to set up). These are
+  **global remote-job boards, mostly US and Europe**, and Arbeitnow is mostly Germany. If you
+  want jobs in your own city, especially outside the US/EU (India, say), they will find you very
+  little on their own. Add Adzuna.
 - **Adzuna** — free API credentials, broad coverage incl. India (set your country code).
 - **LinkedIn & Naukri** — via an Apify token. Off by default.
+
+### Which keys do I need?
+
+None to start: JobPilot runs and searches the free boards with no keys at all. Each key below
+adds one thing. You paste every one of them inside the app yourself, never in a file.
+
+| Key | What it gives you | Cost | How to get it | Where it goes |
+|---|---|---|---|---|
+| **Claude subscription** (no key) | The AI writer: reads jobs, scores fit, writes your CV and emails | Included in Claude Pro/Max (uses your plan's allowance) | 1. Install [Claude Code](https://claude.com/code). 2. In a terminal, run `claude auth login` and sign in. 3. Restart JobPilot. | Settings → *The writer* → Claude subscription |
+| **Groq** (instead of Claude) | The AI writer | Free tier | 1. Sign in at [console.groq.com/keys](https://console.groq.com/keys). 2. Click *Create API Key*. 3. Copy the code (starts with `gsk_`). | Settings → *The writer* → Groq |
+| **Adzuna** | Local job listings in your country, incl. India. **Needed if you want jobs in your own city.** | Free | 1. Register at [developer.adzuna.com](https://developer.adzuna.com). 2. Your dashboard shows an **Application ID** and an **Application Key**. 3. Copy both. | Settings → *Advanced* → *Adzuna app ID* and *Adzuna app key*. Check the country box (two letters: `in`, `gb`, `us`…). Adzuna switches on by itself once both are saved. |
+| **Apify** | LinkedIn and Naukri listings | $5 free credit a month, then paid usage | 1. Make an account at [apify.com](https://apify.com). 2. Open *Settings → API & Integrations* and copy your personal code. 3. Once only: approve the LinkedIn reader (link in the app). Read the warning below first. | Settings → *Advanced* → *Extra job boards* → *Your Apify code*, then turn on LinkedIn/Naukri |
+
+You need only one writer: the Claude subscription *or* Groq (or an OpenAI/Anthropic key, see
+*The AI writer*). If you're job-hunting in India, add Adzuna: without it you'll mostly see
+remote roles abroad.
 
 > ⚠️ **LinkedIn & Naukri — the risk is yours.** These two sites do not allow other tools to read
 > their listings, so reading them through Apify may go against those sites' own terms. That is why

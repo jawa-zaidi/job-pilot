@@ -13,6 +13,11 @@ const P = require('./prompts'); // all quality-critical system prompts live in p
 // One hung LLM request must not stall an entire batch generate; generation can
 // be slow, so the ceiling is generous.
 const LLM_TIMEOUT_MS = 60000;
+// The Claude Code CLI starts a whole process per call (several seconds on
+// Windows before any thinking happens) and then thinks before answering, so a
+// 15-job scoring chunk routinely ran past 60 s and silently fell back to
+// keyword scores. It gets a longer ceiling of its own.
+const CLI_TIMEOUT_MS = 180000;
 
 const PROVIDERS = {
   groq: {
@@ -64,8 +69,19 @@ const CLI_ARGS = [
 // Where the CLI usually lives. `claude` alone covers anything already on PATH;
 // the rest are the common installer targets for when the server was started
 // from a launcher with a minimal PATH.
+// On Windows, `claude` on PATH is usually the npm `claude.cmd` shim, which
+// execFile cannot run without a shell (and a shell would mangle the long
+// --system-prompt argument). So point straight at the real claude.exe: the
+// native installer's copy, then the one inside the npm package.
+const WIN_CANDIDATES = process.platform === 'win32' ? [
+  path.join(os.homedir(), '.local', 'bin', 'claude.exe'),
+  process.env.APPDATA && path.join(process.env.APPDATA, 'npm', 'node_modules',
+    '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
+  'claude.exe'
+] : [];
 const CLI_CANDIDATES = [
   process.env.CLAUDE_CLI_PATH,
+  ...WIN_CANDIDATES,
   'claude',
   path.join(os.homedir(), '.local', 'bin', 'claude'),
   '/opt/homebrew/bin/claude',
@@ -99,8 +115,14 @@ function probeClaudeCode() {
         cwd: os.tmpdir(),
         env: cliEnv()
       });
-    } catch {
-      continue; // not installed at this path (or it failed to run) — try the next
+    } catch (err) {
+      // `auth status` exits non-zero when nobody is signed in but still prints
+      // its JSON — that is "installed, not signed in", not "not installed".
+      if (err && err.stdout && String(err.stdout).trim().startsWith('{')) {
+        out = String(err.stdout);
+      } else {
+        continue; // not installed at this path (or it failed to run) — try the next
+      }
     }
     let status;
     try { status = JSON.parse(out); } catch { status = null; }
@@ -164,7 +186,7 @@ function runClaudeCode(system, prompt, model) {
       {
         cwd: os.tmpdir(),        // neutral cwd — never the user's project
         env: cliEnv(),
-        timeout: LLM_TIMEOUT_MS, // Node kills the child itself once this elapses
+        timeout: CLI_TIMEOUT_MS, // Node kills the child itself once this elapses
         killSignal: 'SIGKILL',
         maxBuffer: 16 * 1024 * 1024
       },
@@ -475,9 +497,109 @@ function mockProfile(cvText) {
 
 // ---------- Job match scoring ----------
 
+// Whole-word, case-insensitive skill match. Letters/digits on either side mean
+// "inside another word"; punctuation is fine, so "c++", "next.js" and "ci/cd"
+// still match as written.
+function hasWord(lowerText, skill) {
+  const s = String(skill || '').toLowerCase().trim();
+  if (!s) return false;
+  const esc = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![a-z0-9])${esc}(?![a-z0-9])`).test(lowerText);
+}
+
+// ---------- Seniority guard for job scoring ----------
+// Job ads put company blurb first and requirements late: in a real Supabase ad
+// "5+ years" sat at character 2,836, while the scorer only ever saw the first
+// 900, so a fresher got 84 "strong fit" for a 5+ year role. The scorer now sees
+// a longer head plus every later sentence that states years of experience, and
+// a deterministic check below enforces the result even if the model ignores it.
+
+const SCORE_DESC_HEAD = 2500;
+const YEARS_RE = /\b(\d{1,2})\s*\+?\s*(?:(?:-|–|to)\s*\d{1,2}\s*\+?\s*)?(?:years?|yrs?)\b/gi;
+
+function scoringDescription(text) {
+  const t = String(text || '');
+  if (t.length <= SCORE_DESC_HEAD) return t;
+  const head = t.slice(0, SCORE_DESC_HEAD);
+  const later = t.slice(SCORE_DESC_HEAD)
+    .split(/\n+|(?<=[.!?])\s+/)
+    .filter(s => { YEARS_RE.lastIndex = 0; return YEARS_RE.test(s); })
+    .map(s => s.trim().slice(0, 240))
+    .slice(0, 6);
+  return later.length
+    ? `${head}\n…\n[Experience requirements stated later in the posting]\n${later.join('\n')}`
+    : head;
+}
+
+// The highest "N years of experience" the ad asks for, or null. Only counts a
+// number tied to experience ("5+ years of …experience", "at least 3 years",
+// "minimum 4 yrs"), so "founded 10 years ago" does not count.
+function requiredYears(text) {
+  const t = String(text || '');
+  let max = null;
+  YEARS_RE.lastIndex = 0;
+  let m;
+  while ((m = YEARS_RE.exec(t))) {
+    const n = Number(m[1]);
+    if (!n || n > 20) continue;
+    const before = t.slice(Math.max(0, m.index - 25), m.index).toLowerCase();
+    const after = t.slice(m.index + m[0].length, m.index + m[0].length + 70).toLowerCase();
+    const tied = /experience|exp\b/.test(after) || /(at least|minimum|min\.?|over)\s*$/.test(before);
+    if (tied && (max === null || n > max)) max = n;
+  }
+  return max;
+}
+
+const SENIOR_TITLE = /\b(senior|sr\.?|staff|lead|principal|head|director|manager|vp|architect)\b/i;
+const EARLY_TITLE = /\b(intern|internship|graduate|grad|junior|jr\.?|entry[- ]level|fresher|trainee|apprentice|new[- ]grad)\b/i;
+// Below MIN_SCORE (40) in discovery.js, so these are filtered as poor fits
+// rather than taking a slot from a job the candidate could actually get.
+const SENIORITY_CAP = 35;
+
+// Adjusts one { score, reasons } entry in place for experience fit. Does
+// nothing when the profile has no years figure to compare against.
+function applySeniority(profile, job, entry) {
+  const raw = profile && profile.years_experience;
+  if (raw === null || raw === undefined || raw === '' || !Number.isFinite(Number(raw))) return entry;
+  const cand = Number(raw);
+  const title = String(job.title || '');
+  const need = requiredYears(job.description);
+  if (need !== null && need >= cand + 2) {
+    entry.score = Math.min(entry.score, SENIORITY_CAP);
+    entry.reasons = [`Asks for ${need}+ years of experience; you have about ${cand}`, ...entry.reasons];
+  } else if (cand < 2 && SENIOR_TITLE.test(title) && !EARLY_TITLE.test(title)) {
+    entry.score = Math.min(entry.score, SENIORITY_CAP);
+    entry.reasons = ['Senior-level title; you are early in your career', ...entry.reasons];
+  } else if (cand < 2 && EARLY_TITLE.test(title)) {
+    entry.score = Math.min(95, entry.score + 10);
+    entry.reasons = ['Early-career role: matches your level', ...entry.reasons];
+  }
+  return entry;
+}
+
+// Keyword fallback: used when the writer is missing or failed, and for any job
+// the writer left out of its answer. It cannot judge seniority or fit, so it
+// is capped below "mid" (55+) and far below "strong fit" (75+): a rough guess
+// must never look like a recommendation. Skills match as whole words, so "go"
+// no longer hits "good"/"Google"/"MongoDB" and "rag" no longer hits "storage".
+const FALLBACK_CAP = 54;
+function keywordScore(profile, j) {
+  const text = `${j.title} ${j.description}`.toLowerCase();
+  const hits = (profile.skills || []).filter(s => hasWord(text, s));
+  const entry = applySeniority(profile, j, {
+    score: 40 + hits.length * 4,
+    reasons: hits.length ? [`Mentions: ${hits.slice(0, 4).join(', ')}`] : []
+  });
+  return {
+    score: Math.min(FALLBACK_CAP, entry.score),
+    reasons: ['Not checked by the AI — this is a rough keyword guess only', ...entry.reasons]
+  };
+}
+
 async function scoreJobs(profile, jobs) {
-  // score in chunks — one giant call truncates and loses accuracy
-  const CHUNK = 15;
+  // score in chunks — one giant call truncates and loses accuracy. The CLI is
+  // much slower per call, so it gets smaller chunks to stay inside its timeout.
+  const CHUNK = cfg().cli ? 5 : 15;
   if (jobs.length > CHUNK) {
     const map = {};
     for (let i = 0; i < jobs.length; i += CHUNK) {
@@ -485,38 +607,48 @@ async function scoreJobs(profile, jobs) {
     }
     return map;
   }
-  const jobList = jobs.map(j => ({
-    id: j.id,
+  // The writer sees short ids ("1", "2", ...) and we map them back. Some
+  // sources' own ids are long (JSearch's are ~150 characters of base64) and
+  // the writer often copied them back slightly wrong, so its score never
+  // reached the job, which then showed a flat 50 with no seniority check.
+  const jobList = jobs.map((j, i) => ({
+    id: String(i + 1),
     title: j.title,
     company: j.company,
-    description: (j.description || '').slice(0, 900)
+    description: scoringDescription(j.description)
   }));
   const result = await chatJSON([
     { role: 'system', content: P.SCORE_JOBS },
     {
       role: 'user',
-      content: `Candidate profile:\n${JSON.stringify(profile)}\n\nJobs:\n${JSON.stringify(jobList)}`
+      content: `Candidate profile:
+${JSON.stringify(profile)}
+
+Jobs:
+${JSON.stringify(jobList)}`
     }
   ], { maxTokens: 3000, promptKinds: ['find'] }).catch(err => {
     console.error('scoreJobs failed:', err.message);
     return null;
   });
-  if (result && Array.isArray(result.scores)) {
-    const map = {};
-    for (const s of result.scores) map[String(s.id)] = { score: s.score, reasons: s.reasons || [] };
-    return map;
-  }
+  return mapScores(profile, jobs, result);
+}
+
+// Turn the writer's answer (short ids) back into { [job.id]: score }.
+// Whatever the writer did not score (it failed, or left a job out) gets the
+// capped keyword guess, never a silent default.
+function mapScores(profile, jobs, result) {
   const map = {};
+  if (result && Array.isArray(result.scores)) {
+    for (const s of result.scores) {
+      const job = jobs[Number(String(s.id).replace(/\D/g, '')) - 1];
+      if (!job || map[String(job.id)]) continue;
+      const entry = { score: Number(s.score) || 0, reasons: s.reasons || [] };
+      map[String(job.id)] = applySeniority(profile, job, entry);
+    }
+  }
   for (const j of jobs) {
-    const text = `${j.title} ${j.description}`.toLowerCase();
-    const hits = (profile.skills || []).filter(s => text.includes(String(s).toLowerCase()));
-    const score = Math.min(95, 40 + hits.length * 12);
-    map[String(j.id)] = {
-      score,
-      reasons: hits.length
-        ? [`Matches your skills: ${hits.slice(0, 4).join(', ')}`]
-        : ['Looks broadly right for you — set the writer up in Settings for a proper read of this one']
-    };
+    if (!map[String(j.id)]) map[String(j.id)] = keywordScore(profile, j);
   }
   return map;
 }
@@ -703,4 +835,5 @@ async function insightsReport(profile, snap, trigger) {
   };
 }
 
-module.exports = { hasKey, providerInfo, claudeCodeStatus, resetClaudeCodeProbe, extractJsonText, extractProfile, scoreJobs, tailorApplication, formatEmailBody, reviewTailored, classifyReply, followUpEmail, insightsReport, devFeedbackReport, PROVIDERS };
+module.exports = { hasKey, providerInfo, claudeCodeStatus, resetClaudeCodeProbe, extractJsonText, extractProfile, scoreJobs,
+  scoringHelpers: { hasWord, scoringDescription, requiredYears, applySeniority, mapScores, keywordScore }, tailorApplication, formatEmailBody, reviewTailored, classifyReply, followUpEmail, insightsReport, devFeedbackReport, PROVIDERS };

@@ -22,6 +22,7 @@ Weigh, in order:
 5. Location/remote compatibility.
 
 Hard penalties: missing a stated must-have requirement (visa, certification, clearance, language) → cap at 45. Staffing-agency spam, vague "multiple openings" posts, or commission-only roles → cap at 40.
+Experience is a must-have: compare the job's required years (read the WHOLE description, including any "[Experience requirements stated later in the posting]" lines) with the candidate's years_experience. If the job asks for 2+ more years than the candidate has, or the title is Senior/Staff/Lead/Principal/Head/Manager/Architect and the candidate has under 2 years → cap at 35, however well the skills match. For a candidate under 2 years, intern/graduate/junior/entry-level/new-grad roles that match their skills are the best fits: score them highest.
 Calibration: 85+ means "obvious strong fit, apply today"; 70-84 solid fit; 55-69 plausible stretch; below 55 poor use of an application. Use the full range — do not cluster everything at 60-75.
 Give 2-3 short, specific reasons per job naming the actual skills/requirements that drove the score.
 Respond ONLY with JSON: {"scores":[{"id":str,"score":num,"reasons":[str]}]}`;
