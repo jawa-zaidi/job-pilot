@@ -28,6 +28,12 @@ function markBusy(op) {
   db.currentRun.activeSince = now();
   save();
 }
+// Stop: anything that started before the Stop press finishes the job it is on
+// and then stops. Work started after the press is not affected.
+let stopAt = 0;
+function requestStop() { stopAt = Date.now(); }
+function stoppedSince(startedAt) { return stopAt >= startedAt; }
+
 function clearBusy() {
   const db = load();
   if (db.currentRun) { db.currentRun.activeOp = null; save(); }
@@ -120,4 +126,4 @@ function listRuns(limit = 20) {
   return { runs: (db.runs || []).slice(0, limit), current: db.currentRun || null };
 }
 
-module.exports = { startRun, beginIfNeeded, addToRun, finishRun, markBusy, clearBusy, settleIdleRun, listRuns };
+module.exports = { startRun, beginIfNeeded, addToRun, finishRun, markBusy, clearBusy, settleIdleRun, listRuns, requestStop, stoppedSince };

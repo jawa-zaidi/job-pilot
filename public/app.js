@@ -398,6 +398,20 @@ $('#smartBtn')?.addEventListener('click', async e => {
     obRender();
     return;
   }
+  // Writing is the slow, costly step (about a minute per application with
+  // the Claude subscription), so a big batch asks first instead of starting
+  // on one click.
+  if (action === 'generate') {
+    const { disc, appr } = pipelineCounts();
+    const n = disc + appr;
+    if (n > 3 && !confirm(`Write ${n} applications now?
+
+`
+      + `Each one is a tailored CV and message, so this takes a while (with a Claude subscription, about ${n} minutes) and uses your AI allowance.
+
+`
+      + `You can press Stop at any time. To write fewer, take the ones you don't want off your list first (Skip → Not interested).`)) return;
+  }
   btn.disabled = true;
   const oldText = btn.textContent;
   btn.innerHTML = '<span class="jp-spinner"></span>Working…';
@@ -417,7 +431,9 @@ $('#smartBtn')?.addEventListener('click', async e => {
     } else if (action === 'generate') {
       const r = await api('/api/batch/generate', { method: 'POST' });
       state.lastRunCost = r.cost; state.lastRunLabel = 'generate';
-      if (r.done === 0 && r.error) {
+      if (r.stopped) {
+        toast(`Stopped. ${r.done} written; the other ${Math.max(0, r.total - r.done - r.failed)} are untouched and still on your list.`);
+      } else if (r.done === 0 && r.error) {
         toast(r.error, true);
       } else {
         toast(`Written — ${r.done} CV${r.done === 1 ? '' : 's'} and ${r.done === 1 ? 'a message' : 'messages'} to go with ${r.done === 1 ? 'it' : 'them'}`
@@ -712,7 +728,7 @@ function renderRunStatus() {
   if (op) {
     const L = OP_LABELS[op];
     el.className = 'run-status running';
-    el.innerHTML = `<span class="spinner"></span><b>${L.icon} ${L.text}…</b> <span class="rs-sub">${esc(L.count(r))}${r.mode === 'auto' ? ' · auto run' : ''} · running ${Math.max(0, Math.round((Date.now() - r.activeSince) / 1000))}s · cost so far ${fmtCost((r.costAI || 0) + (r.costSource || 0))}</span>`;
+    el.innerHTML = `<span class="spinner"></span><b>${L.icon} ${L.text}…</b> <span class="rs-sub">${esc(L.count(r))}${r.mode === 'auto' ? ' · auto run' : ''} · running ${Math.max(0, Math.round((Date.now() - r.activeSince) / 1000))}s · cost so far ${fmtCost((r.costAI || 0) + (r.costSource || 0))}</span> <button class="jp-btn jp-btn--secondary jp-btn--xs" data-stop-run>Stop</button>`;
     // keep the big button locked while the step runs, with a matching label
     const btn = $('#smartBtn');
     if (btn) {
@@ -4300,11 +4316,31 @@ function homeRunHtml(data) {
         <span class="jp-dot jp-dot--live"></span>
         <div class="jp-h-sans">${esc(OP_LABELS[op].text)}…</div>
         <span class="jp-note jp-spacer">${esc(elapsed)}</span>
+        <button class="jp-btn jp-btn--secondary jp-btn--xs" data-stop-run>Stop</button>
       </div>
       ${steps}
       <p class="jp-note jp-home-run-foot">You can close this — we'll keep going and tell you when it's done.</p>
     </div>`;
 }
+
+// Stop, from the Home run card or the banner: the server finishes the one
+// job in hand (a CV half-written by the AI can't be cut off cleanly), then
+// stops. Nothing already written or sent is undone.
+document.addEventListener('click', async e => {
+  const btn = e.target.closest && e.target.closest('[data-stop-run]');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Stopping…';
+  try {
+    await api('/api/batch/stop', { method: 'POST' });
+    toast('Stopping — it will finish the one it is on, then stop. Nothing already done is undone.');
+    pokeRefresh();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Stop';
+    toast(err.message, true);
+  }
+});
 
 function homeFeedHtml(items) {
   const days = [];

@@ -125,6 +125,16 @@ app.post('/api/batch/fetch', async (req, res) => {
   }
 });
 
+// Stop whatever is running (finding, writing or sending). It finishes the job
+// it is on, then stops; nothing already written or sent is undone.
+app.post('/api/batch/stop', (req, res) => {
+  const db = load();
+  const op = db.currentRun?.activeOp || null;
+  require('./runs').requestStop();
+  if (op) logActivity(`Stop pressed while ${op} — finishing the one in hand, then stopping`, 'move');
+  res.json({ ok: true, op });
+});
+
 app.post('/api/batch/approve', (req, res) => {
   res.json(batch.approveAll());
 });
@@ -757,6 +767,10 @@ function start() {
     // Anything already written but no longer on the right path (an existing
     // store, or a mode changed while the app was closed) is re-routed once here.
     try { batch.applySendingMode(); } catch { /* never block start-up */ }
+    // A fresh start is running nothing, so a "busy" mark left by a run that
+    // was cut short (closed window, crash) is stale: clear it, or the app
+    // shows "Writing your applications…" for up to 10 minutes.
+    try { require('./runs').clearBusy(); } catch { /* never block start-up */ }
     console.log(`JobPilot is running. Open it at http://${shownHost}:${PORT}`);
     if (LAN) {
       console.log('Careful: anyone on your network can open this copy of JobPilot — read your CV, change your settings and send email as you. Close JobPilot and start it normally to keep it to this computer.');

@@ -15,7 +15,7 @@
 // the new index.html / app.js / styles.css on their next load. Nothing else to
 // do — there are no hashed filenames to update.
 // ---------------------------------------------------------------------------
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v8';
 const CACHE_NAME = `jobpilot-shell-${CACHE_VERSION}`;
 
 // Everything needed to paint the app shell with the network unplugged. The

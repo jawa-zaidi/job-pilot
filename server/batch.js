@@ -91,7 +91,10 @@ async function fetchBatch(target) {
   // discovery (a target of 5 with 6 action cards used to fetch NOTHING).
   const pendingCount = () =>
     load().applications.filter(a => ['discovered', 'approved', 'ready'].includes(a.status)).length;
+  const startedAt = Date.now();
+  let stopped = false;
   for (const q of queries) {
+    if (runs.stoppedSince(startedAt)) { stopped = true; break; }
     const pending = pendingCount();
     if (pending >= target) break;
     // pull more per source the further we are from the target, but never add past it
@@ -126,10 +129,10 @@ async function fetchBatch(target) {
   } else {
     // sources ran but produced nothing → the toast must carry the WHY
     if (!added && notes.size) reason = [...notes].join(' · ');
-    logActivity(`Batch fetch done: ${added} new matches (${skipped} poor fits filtered) across ${used.length} searches · cost ${costs.fmt(cost.usd)}`, 'search');
+    logActivity(`Batch fetch done: ${added} new matches (${skipped} poor fits filtered) across ${used.length} searches${stopped ? ' (stopped by you)' : ''} · cost ${costs.fmt(cost.usd)}`, 'search');
   }
   save();
-  return { added, skipped, queries: used, discovered, target, cost, reason };
+  return { added, skipped, queries: used, discovered, target, cost, reason, stopped };
 }
 
 // Step 1b: approve everything still in "discovered" (user removes bad ones first)
@@ -153,8 +156,10 @@ async function generateAll({ statuses = ['discovered', 'approved'], minScore = 0
   const heldBack = db.applications.filter(a => statuses.includes(a.status) && (a.matchScore || 0) < minScore).length;
   runs.markBusy('generating');
   const runStart = costs.beginRun();
-  let done = 0, failed = 0, manualQueued = 0, fixed = 0, lastError = '';
+  const startedAt = Date.now();
+  let done = 0, failed = 0, manualQueued = 0, fixed = 0, lastError = '', stopped = false;
   for (const a of targets) {
+    if (runs.stoppedSince(startedAt)) { stopped = true; break; }
     try {
       if (!a.tailored) {
         a.tailored = await llm.tailorApplication(db.profile, db.cvText || '', a);
@@ -190,10 +195,10 @@ async function generateAll({ statuses = ['discovered', 'approved'], minScore = 0
       // Wording read by the Home feed's rule for this line — change both together.
       `Batch generate: ${done} tailored CVs & emails ready${fixed ? ` (${fixed} corrected by fact-check)` : ''}` +
       `${manualQueued ? `, ${manualQueued} for you to send yourself (Your action column)` : ''}` +
-      `${failed ? `, ${failed} failed` : ''} · cost ${costs.fmt(cost.usd)}`, 'tailor');
+      `${failed ? `, ${failed} failed` : ''}${stopped ? ` · stopped by you, ${targets.length - done - failed} not written` : ''} · cost ${costs.fmt(cost.usd)}`, 'tailor');
   }
   save();
-  return { done, failed, manualQueued, fixed, heldBack, total: targets.length, cost, error: failed ? lastError : '' };
+  return { done, failed, manualQueued, fixed, heldBack, total: targets.length, cost, error: failed ? lastError : '', stopped };
 }
 
 // Step 3: send everything on the email path. Each job is re-checked against
@@ -227,8 +232,10 @@ async function sendAll({ skipInsights = false, minScore = 0 } = {}) {
     a.status === 'ready' && a.tailored && a.recipientEmail && (a.matchScore || 0) < minScore).length;
   if (targets.length) runs.markBusy('sending');
   const paced = emailer.isConfigured(); // real sends → pace them; simulated → no delay
-  let sent = 0, simulated = 0, failed = 0, expired = 0;
+  let sent = 0, simulated = 0, failed = 0, expired = 0, stopped = false;
+  const startedAt = Date.now();
   for (const a of targets) {
+    if (runs.stoppedSince(startedAt)) { stopped = true; break; }
     try {
       const alive = await verifyJobLive(a);
       if (!alive.live) {
@@ -282,8 +289,12 @@ async function sendAll({ skipInsights = false, minScore = 0 } = {}) {
 async function runAutoCycle(target) {
   const floor = autoMinScore();
   runs.startRun('auto');
+  const cycleStart = Date.now();
   const fetch = await fetchBatch(target);
+  // Stop during any step ends the whole cycle, not just that step.
+  if (runs.stoppedSince(cycleStart)) { runs.clearBusy(); return { fetch, stopped: true }; }
   const generated = await generateAll({ minScore: floor }); // weak fits stay in Discovered
+  if (runs.stoppedSince(cycleStart)) { runs.clearBusy(); return { fetch, generated, stopped: true }; }
   const sendResult = await sendAll({ skipInsights: true, minScore: floor });
   const run = sendResult.run;
   logActivity(
