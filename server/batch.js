@@ -64,7 +64,17 @@ function applySendingMode() {
 
 // Step 1: fetch across multiple queries derived from the CV until the target
 // number of unapplied matches is on the board (or sources are exhausted).
-async function fetchBatch(target) {
+// A batch fetch already running (auto-search or a click) is joined, not
+// started again: a second one would only repeat the same searches.
+let fetchInFlight = null;
+function fetchBatch(target) {
+  if (!fetchInFlight) {
+    fetchInFlight = fetchBatchNow(target).finally(() => { fetchInFlight = null; });
+  }
+  return fetchInFlight;
+}
+
+async function fetchBatchNow(target) {
   const db = load();
   if (!db.profile) throw new Error("We need your CV first — it's what every application is written from.");
   target = target || dailyTarget();

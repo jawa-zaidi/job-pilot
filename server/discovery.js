@@ -31,7 +31,18 @@ function rankBoosts(job, preferredTitles = []) {
   return { bonus, boosts };
 }
 
-async function discover(query, { activityLabel = 'Job search', limit = 10, maxAdd = Infinity } = {}) {
+// One search at a time. Each search reads the saved jobs to skip ones already
+// on the board, so two running at once (the auto-search that fires when the
+// server starts, plus the Find jobs button) both missed each other's new jobs
+// and added the same openings twice. Searches now queue behind each other.
+let searchQueue = Promise.resolve();
+function discover(...args) {
+  const run = searchQueue.then(() => discoverNow(...args));
+  searchQueue = run.catch(() => {});
+  return run;
+}
+
+async function discoverNow(query, { activityLabel = 'Job search', limit = 10, maxAdd = Infinity } = {}) {
   const db = load();
   if (!db.profile) throw new Error('Upload your CV first');
   // Default query priority: user's preferred title > CV-derived role > CV title
