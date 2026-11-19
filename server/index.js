@@ -508,8 +508,13 @@ app.get('/api/settings', (req, res) => {
       linkedin: sourcesConfig().linkedin,
       naukri: sourcesConfig().naukri,
       ats: sourcesConfig().ats,
-      adzuna: sourcesConfig().adzuna
+      adzuna: sourcesConfig().adzuna,
+      jsearch: sourcesConfig().jsearch
     },
+    jsearchKeySet: !!s.jsearchKey,
+    jsearchCountry: s.jsearchCountry || 'in',
+    jsearchDailyLimit: s.jsearchDailyLimit ?? 6,
+    jsearchUsedToday: require('./sources/jsearch').usage().used,
     apifyTokenSet: !!(s.apifyToken),
     apifyTokenMasked: s.apifyToken ? s.apifyToken.slice(0, 10) + '…' : '',
     atsCompanies: s.atsCompanies || '',
@@ -549,6 +554,11 @@ app.post('/api/settings', (req, res) => {
   if (req.body.adzunaAppId !== undefined) db.settings.adzunaAppId = String(req.body.adzunaAppId).trim();
   if (req.body.adzunaAppKey !== undefined && String(req.body.adzunaAppKey).trim()) db.settings.adzunaAppKey = String(req.body.adzunaAppKey).trim();
   if (req.body.adzunaCountry !== undefined) db.settings.adzunaCountry = String(req.body.adzunaCountry).trim().toLowerCase() || 'in';
+  if (req.body.jsearchKey !== undefined && String(req.body.jsearchKey).trim()) db.settings.jsearchKey = String(req.body.jsearchKey).trim();
+  if (req.body.jsearchCountry !== undefined) db.settings.jsearchCountry = String(req.body.jsearchCountry).trim().toLowerCase() || 'in';
+  if (req.body.jsearchDailyLimit !== undefined && String(req.body.jsearchDailyLimit).trim() !== '') {
+    db.settings.jsearchDailyLimit = Math.min(200, Math.max(0, Math.round(Number(req.body.jsearchDailyLimit)) || 0));
+  }
   if (req.body.autoMinScore !== undefined) db.settings.autoMinScore = Math.min(95, Math.max(0, Number(req.body.autoMinScore) || 70));
   if (req.body.factCheck !== undefined) db.settings.factCheck = !!req.body.factCheck;
   if (req.body.companyCooldownDays !== undefined) db.settings.companyCooldownDays = Math.max(0, Number(req.body.companyCooldownDays) || 0);

@@ -8,6 +8,7 @@ const { load, logActivity } = require('./db');
 const ats = require('./sources/ats');
 const adzuna = require('./sources/adzuna');
 const naukri = require('./sources/naukri');
+const jsearch = require('./sources/jsearch');
 
 // ---------- Canonical job identity ----------
 // The same opening shows up on several boards with different IDs — dedup and
@@ -105,6 +106,7 @@ function sourcesConfig() {
     naukri: !!s.sources?.naukri,
     ats: ats.companySlugs().length > 0,      // on when company boards are listed
     adzuna: adzuna.isConfigured(),           // on when API credentials are set
+    jsearch: jsearch.isConfigured(),         // on when a RapidAPI key is set
     apifyToken: s.apifyToken || ''
   };
 }
@@ -398,6 +400,21 @@ async function searchJobs(query, limit = 10) {
     }
   }
 
+  if (cfg.jsearch) {
+    try {
+      // A city if there is one (JSearch wants it in the query), else remote.
+      const place = prefs.locations.find(l => !/remote|anywhere|worldwide/i.test(l)) || prefs.locations[0] || '';
+      const js = await jsearch.searchJSearch(query, { maxAgeDays: prefs.maxAgeDays, location: place });
+      const refined = refine(js, prefs);
+      filtered += js.length - refined.length;
+      jobs.push(...refined.slice(0, limit));
+      if (refined.length) used.push('JSearch');
+    } catch (err) {
+      console.error('JSearch fetch failed:', err.message);
+      problems.push(`JSearch: ${err.message.slice(0, 160)}`);
+    }
+  }
+
   if (cfg.remotive) {
     // Free boards. Remotive/RemoteOK are remote/English; Arbeitnow is EU/Germany-
     // heavy, so we only query it when the user actually targets Europe (else it
@@ -467,7 +484,7 @@ async function searchJobs(query, limit = 10) {
 
   if (!jobs.length) {
     // An empty result is always explained — never padded with fake demo jobs.
-    const enabledAny = cfg.remotive || cfg.ats || cfg.adzuna || cfg.linkedin || cfg.naukri;
+    const enabledAny = cfg.remotive || cfg.ats || cfg.adzuna || cfg.jsearch || cfg.linkedin || cfg.naukri;
     let note = '';
     if (!enabledAny) {
       note = 'No job sources are switched on — turn at least one on in Settings, under Advanced. The free boards need nothing setting up.';

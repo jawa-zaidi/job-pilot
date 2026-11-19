@@ -592,6 +592,7 @@ function renderSideStatus(s) {
     { on: s.sources.ats, name: 'Career pages (ATS)', note: s.sources.ats ? 'live' : 'add companies' },
     { on: s.sources.remotive, name: 'Free boards ×3', note: s.sources.remotive ? 'live' : 'off' },
     { on: s.sources.adzuna, name: 'Adzuna', note: s.sources.adzuna ? 'live' : 'add API keys' },
+    { on: s.sources.jsearch, name: 'JSearch (Google Jobs)', note: s.sources.jsearch ? `live · ${s.jsearchUsedToday || 0}/${s.jsearchDailyLimit ?? 6} today` : 'add RapidAPI key' },
     { on: s.sources.linkedin && s.apifyTokenSet, name: 'LinkedIn (Apify)', note: s.sources.linkedin ? (s.apifyTokenSet ? 'live' : 'needs token') : 'off' },
     { on: s.sources.naukri && s.apifyTokenSet, name: 'Naukri (Apify)', note: s.sources.naukri ? (s.apifyTokenSet ? 'live' : 'needs token') : 'off' }
   ].map(x =>
@@ -2029,6 +2030,28 @@ function setBoardsBody(s) {
       <span class="jp-field-help">Two letters — in, gb, us, de. This one only affects Adzuna; the places you
         chose still decide what you actually see.</span>
     </label>
+    <p class="jp-note jp-adv-para">JSearch reads Google's job search, which collects LinkedIn, Indeed, Naukri,
+      Glassdoor and company career pages, through a proper paid API instead of scraping those sites. It has a
+      free plan: make an account at <a href="https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch" target="_blank"
+      rel="noopener">rapidapi.com</a>, subscribe to JSearch's free plan, and copy your <b>X-RapidAPI-Key</b>.
+      Each search uses one request from that plan, so JobPilot stops for the day at the limit below.</p>
+    <label class="jp-field">
+      <span class="jp-field-label">JSearch key (RapidAPI)</span>
+      <input class="jp-input jp-input--sm" type="password" id="setJsearchKey" autocomplete="off"
+        placeholder="${s.jsearchKeySet ? 'already saved — paste a new one to replace it' : 'your X-RapidAPI-Key'}">
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">JSearch country</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="setJsearchCountry" maxlength="2"
+        value="${esc(s.jsearchCountry || 'in')}" placeholder="in">
+    </label>
+    <label class="jp-field">
+      <span class="jp-field-label">JSearch searches per day, at most</span>
+      <input class="jp-input jp-input--sm jp-inline-num" id="setJsearchDailyLimit" inputmode="numeric"
+        value="${esc(String(s.jsearchDailyLimit ?? 6))}" placeholder="6">
+      <span class="jp-field-help">Used today: ${esc(String(s.jsearchUsedToday || 0))}. About 6 a day keeps a
+        200-a-month free plan going all month.</span>
+    </label>
     ${setSaveRowHtml('boards')}`;
 }
 
@@ -2163,10 +2186,11 @@ function setAdvRows(s) {
   if (src.linkedin) on.push('LinkedIn');
   if (src.naukri) on.push('Naukri');
   if (src.adzuna) on.push('Adzuna');
+  if (src.jsearch) on.push('JSearch');
   const written = [s.promptFind, s.promptCV, s.promptEmail].filter(x => (x || '').trim()).length;
   const rows = [
     { id: 'boards', title: 'Extra job boards',
-      sub: 'LinkedIn, Naukri and Adzuna. They need an account and a code from them.',
+      sub: 'LinkedIn, Naukri, Adzuna and JSearch (Google Jobs). They need an account and a code from them.',
       state: on.length ? on.join(', ') : 'none on', body: () => setBoardsBody(s) },
     { id: 'prompts', title: 'Your own instructions to the writer',
       sub: 'Rules like "no agency jobs" or "keep messages short".',
@@ -2315,7 +2339,10 @@ function setBodyFor(kind, s) {
     apifyToken: setVal('setApifyToken'),
     adzunaAppId: setVal('setAdzunaAppId'),
     adzunaAppKey: setVal('setAdzunaAppKey'),
-    adzunaCountry: setVal('setAdzunaCountry')
+    adzunaCountry: setVal('setAdzunaCountry'),
+    jsearchKey: setVal('setJsearchKey'),
+    jsearchCountry: setVal('setJsearchCountry'),
+    jsearchDailyLimit: setVal('setJsearchDailyLimit')
   };
   if (kind === 'prompts') return {
     promptFind: setVal('setPromptFind'), promptCV: setVal('setPromptCV'), promptEmail: setVal('setPromptEmail')
