@@ -310,6 +310,23 @@ first (before roles guessed from your CV) and matching jobs rank higher.
 > The same note is shown in the app, next to the two switches (Settings → *Advanced* →
 > *Extra job boards*).
 
+### JSearch (Google for Jobs)
+
+JSearch reads Google's job search, which already collects LinkedIn, Indeed, Naukri, Glassdoor
+and company career pages, so one search brings in all of them, through a proper paid API
+instead of scraping those sites. It is the easiest way to get real jobs in your own city.
+
+- **Cost:** free plan on RapidAPI (about 200 requests a month), paid plans above that. Each
+  search uses one request.
+- **Daily limit:** JobPilot stops calling JSearch for the day once it reaches your limit
+  (default 6, which keeps a free plan going all month). Settings shows how many it used today.
+- **Where it comes from:** each job shows its real board, e.g. *JSearch · LinkedIn*.
+
+**Set it up:** make an account at [rapidapi.com](https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch),
+subscribe to JSearch's free plan, and copy your **X-RapidAPI-Key**. Paste it in Settings →
+*Advanced* → *Extra job boards* → *JSearch key*, and set the country (two letters, `in` by
+default). JSearch switches on by itself once the key is saved.
+
 ### Gmail sending limits
 
 Application emails and follow-ups send from your own Gmail over SMTP, using a Google app
@@ -328,6 +345,25 @@ round sensible (the default is 50) and expect occasional throttling if you push 
 - **Fact-check** — every tailored CV and email passes a second AI review that strips invented
   skills and claims before anything goes out. When it corrects something, the job's panel says
   so.
+- **Experience matching** — the scorer reads every line that states the years of experience a
+  job needs, not just the start of the description. A role that needs at least 2 more years
+  than you have, or a senior title when you have under 2 years, is capped at 35, so it never
+  shows as a good fit. Intern, graduate, junior and entry-level roles get a small boost for
+  early-career profiles. Set your years of experience in your profile for this to work.
+- **Closed and expired adverts left out** — before new jobs are scored, JobPilot drops adverts
+  whose stated application deadline has passed, whose page is gone (404/410), or whose page
+  says the job is closed or filled. Anything uncertain is kept. The activity line says how
+  many were left out.
+- **Skip a job** — the *Skip* menu in a job's panel: *I already applied* (tracks it and
+  reminds you to follow up), *They said no* (moves it to Closed) or *Not interested* (removes
+  it). Whichever you pick, later searches never bring that job back.
+- **Stop** — while JobPilot is finding, writing or sending, a *Stop* button finishes the job in
+  hand and stops; nothing already done is undone. Writing more than 3 applications asks first,
+  since each one takes about a minute with a Claude subscription and uses your AI allowance.
+- **One search at a time** — a search started while another is running waits for it, so the
+  same job is never added twice.
+- **City names** — places that go by two names match either way (Bangalore/Bengaluru,
+  Gurgaon/Gurugram, Bombay/Mumbai and more), so jobs aren't thrown away over spelling.
 - **Liveness check** — each posting is re-fetched right before sending; expired jobs are
   closed, not applied to.
 - **Threshold for unattended rounds** — JobPilot only sends matches above your threshold
@@ -378,12 +414,11 @@ sender-anonymous. Turn it off at any time; it is off until you turn it on.
 This is an honest list, not a disclaimer. The work described above is new and has **not** been
 fully tested end to end.
 
-- **The Windows install path has never been run on real Windows.** `JobPilot.bat`,
-  `install\preflight.bat` and the Desktop / Start Menu shortcut script were written and
-  reviewed line by line, but no one has double-clicked them on an actual Windows machine.
-  `JobPilot-Windows.zip` is built by the same script as the Mac ones and its contents were
-  checked file by file, but it has not been unzipped on Windows either. Expect to hit
-  something. The macOS path has been run repeatedly, including from folders with spaces and
+- **The Windows install path has been run once, from a git clone.** On Windows 11 with
+  Node 24, `JobPilot.bat` → `install\preflight.bat` → launch worked first time: npm install,
+  Desktop / Start Menu shortcuts and the app on :4310. The Claude subscription and scoring bugs
+  that run found are fixed. `JobPilot-Windows.zip` itself has still not been unzipped on
+  Windows. The macOS path has been run repeatedly, including from folders with spaces and
   brackets in the name, with Node.js deliberately missing, and — for the release build — from
   a fresh unzip with the runtime quarantined and no Node.js on the machine at all.
 - **No real Gmail send has been done.** Saving your Gmail details, the "send myself a test"
@@ -420,8 +455,9 @@ fully tested end to end.
 - `server/jobs.js` — source orchestration, canonical job identity, recruiter-email extraction,
   LinkedIn via Apify
 - `server/sources/` — ATS career pages (Greenhouse/Lever/Ashby/SmartRecruiters/Recruitee/
-  Workable), Adzuna, Naukri
-- `server/verify.js` — just-in-time posting liveness check
+  Workable), Adzuna, Naukri, JSearch
+- `server/verify.js` — just-in-time posting liveness check, and the closed/expired advert
+  filter used before scoring
 - `server/pdf.js` — tailored CV → PDF attachment
 - `server/runs.js` — per-round outcome + cost ledger
 - `server/costs.js` — cost ledger, including "included in your subscription" at $0
